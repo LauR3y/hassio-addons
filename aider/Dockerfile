@@ -1,36 +1,28 @@
-ARG BUILD_FROM=ghcr.io/hassio-addons/base:17.0.0
-FROM ${BUILD_FROM}
+ARG BUILD_FROM
+# Use official aider image as base (it has everything pre-built)
+FROM paulgauthier/aider-full:latest
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+USER root
 
-# Install Python, git, ttyd and build dependencies
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    py3-virtualenv \
-    git \
-    git-lfs \
-    openssh-client \
-    bash \
-    ttyd \
-    # Build dependencies for pip packages
-    && apk add --no-cache --virtual .build-deps \
-        python3-dev \
-        gcc \
-        musl-dev \
-        libffi-dev \
-    # Create venv and install aider
-    && python3 -m venv /opt/aider-venv \
-    && . /opt/aider-venv/bin/activate \
-    && pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir aider-chat \
-    && deactivate \
-    # Cleanup
-    && apk del .build-deps \
-    && rm -rf /root/.cache /tmp/*
+# Install dependencies and ttyd
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    wget \
+    && ARCH=$(dpkg --print-architecture) \
+    && if [ "$ARCH" = "arm64" ]; then TTYD_ARCH="aarch64"; else TTYD_ARCH="x86_64"; fi \
+    && wget -qO /usr/local/bin/ttyd "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.${TTYD_ARCH}" \
+    && chmod +x /usr/local/bin/ttyd \
+    && apt-get remove -y wget \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
-# Add aider to PATH
-ENV PATH="/opt/aider-venv/bin:${PATH}"
-
-# Copy root filesystem
+# Copy startup scripts
 COPY rootfs /
+
+# Make scripts executable
+RUN chmod +x /init.sh
+
+WORKDIR /config
+
+# Use custom entrypoint for HA integration
+ENTRYPOINT ["/init.sh"]
