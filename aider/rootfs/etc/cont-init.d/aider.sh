@@ -1,4 +1,4 @@
-#!/command/with-contenv bashio
+#!/usr/bin/with-contenv bashio
 # ==============================================================================
 # Home Assistant Add-on: Aider AI Coding Assistant
 # Initializes Aider configuration and git repository
