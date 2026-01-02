@@ -1,0 +1,43 @@
+{
+  "name": "Aider AI Coding Assistant",
+  "version": "0.1.0",
+  "slug": "aider",
+  "description": "AI pair programming - edit code with Claude, GPT-4, DeepSeek and more",
+  "arch": ["aarch64", "amd64"],
+  "startup": "application",
+  "boot": "auto",
+  "ingress": true,
+  "ingress_port": 7681,
+  "ingress_stream": true,
+  "panel_icon": "mdi:robot",
+  "panel_title": "Aider",
+  "hassio_api": true,
+  "hassio_role": "default",
+  "map": ["config:rw", "ssl:ro", "share:rw"],
+  "options": {
+    "openai_api_key": "",
+    "anthropic_api_key": "",
+    "deepseek_api_key": "",
+    "google_api_key": "",
+    "openrouter_api_key": "",
+    "default_model": "sonnet",
+    "auto_commits": true,
+    "git_user_name": "Aider",
+    "git_user_email": "aider@homeassistant.local",
+    "init_git": true,
+    "extra_args": ""
+  },
+  "schema": {
+    "openai_api_key": "password?",
+    "anthropic_api_key": "password?",
+    "deepseek_api_key": "password?",
+    "google_api_key": "password?",
+    "openrouter_api_key": "password?",
+    "default_model": "str",
+    "auto_commits": "bool",
+    "git_user_name": "str",
+    "git_user_email": "str",
+    "init_git": "bool",
+    "extra_args": "str?"
+  }
+}

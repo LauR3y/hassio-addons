@@ -1,0 +1,65 @@
+#!/command/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Aider AI Coding Assistant
+# Runs ttyd web terminal with Aider
+# ==============================================================================
+
+bashio::log.info "Starting Aider web terminal..."
+
+# Export API keys as environment variables
+if bashio::config.has_value 'openai_api_key'; then
+    export OPENAI_API_KEY="$(bashio::config 'openai_api_key')"
+    bashio::log.info "OpenAI API key configured"
+fi
+
+if bashio::config.has_value 'anthropic_api_key'; then
+    export ANTHROPIC_API_KEY="$(bashio::config 'anthropic_api_key')"
+    bashio::log.info "Anthropic API key configured"
+fi
+
+if bashio::config.has_value 'deepseek_api_key'; then
+    export DEEPSEEK_API_KEY="$(bashio::config 'deepseek_api_key')"
+    bashio::log.info "DeepSeek API key configured"
+fi
+
+if bashio::config.has_value 'google_api_key'; then
+    export GEMINI_API_KEY="$(bashio::config 'google_api_key')"
+    bashio::log.info "Google/Gemini API key configured"
+fi
+
+if bashio::config.has_value 'openrouter_api_key'; then
+    export OPENROUTER_API_KEY="$(bashio::config 'openrouter_api_key')"
+    bashio::log.info "OpenRouter API key configured"
+fi
+
+# Get configuration
+MODEL="$(bashio::config 'default_model')"
+EXTRA_ARGS="$(bashio::config 'extra_args')"
+
+# Get ttyd binding info from ingress
+INTERFACE="$(bashio::addon.ip_address)"
+PORT="$(bashio::addon.ingress_port)"
+
+bashio::log.info "Starting ttyd on ${INTERFACE}:${PORT} with model ${MODEL}"
+
+# Build aider command
+AIDER_CMD="aider --model ${MODEL}"
+
+if bashio::config.true 'auto_commits'; then
+    AIDER_CMD="${AIDER_CMD} --auto-commits"
+else
+    AIDER_CMD="${AIDER_CMD} --no-auto-commits"
+fi
+
+if bashio::config.has_value 'extra_args'; then
+    AIDER_CMD="${AIDER_CMD} ${EXTRA_ARGS}"
+fi
+
+# Execute ttyd with aider
+exec ttyd \
+    -i "${INTERFACE}" \
+    -p "${PORT}" \
+    -W \
+    -t "titleFixed=Aider - AI Coding Assistant" \
+    -t "reconnect=3" \
+    bash -c "cd /homeassistant && ${AIDER_CMD}"
