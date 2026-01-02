@@ -62,4 +62,4 @@ exec ttyd \
     -W \
     -t "titleFixed=Aider - AI Coding Assistant" \
     -t "reconnect=3" \
-    bash -c "cd /homeassistant && ${AIDER_CMD}"
+    bash -c "cd /config && ${AIDER_CMD}"

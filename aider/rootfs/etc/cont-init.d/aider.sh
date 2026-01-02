@@ -6,10 +6,10 @@
 
 bashio::log.info "Initializing Aider..."
 
-# Initialize git in /homeassistant if requested and not present
-if bashio::config.true 'init_git' && [ ! -d "/homeassistant/.git" ]; then
-    bashio::log.info "Initializing git repository in /homeassistant..."
-    cd /homeassistant
+# Initialize git in /config if requested and not present
+if bashio::config.true 'init_git' && [ ! -d "/config/.git" ]; then
+    bashio::log.info "Initializing git repository in /config..."
+    cd /config
     git init
     git config user.name "$(bashio::config 'git_user_name')"
     git config user.email "$(bashio::config 'git_user_email')"
@@ -38,9 +38,9 @@ EOF
     git add -A
     git commit -m "Initial commit by Aider add-on" || true
     bashio::log.info "Git repository initialized"
-elif [ -d "/homeassistant/.git" ]; then
-    bashio::log.info "Git repository already exists in /homeassistant"
-    cd /homeassistant
+elif [ -d "/config/.git" ]; then
+    bashio::log.info "Git repository already exists in /config"
+    cd /config
     git config user.name "$(bashio::config 'git_user_name')"
     git config user.email "$(bashio::config 'git_user_email')"
 fi
