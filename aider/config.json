@@ -1,6 +1,6 @@
 {
   "name": "Aider AI Coding Assistant",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "slug": "aider",
   "description": "AI pair programming - edit code with Claude, GPT-4, DeepSeek and more",
   "arch": ["aarch64", "amd64"],
