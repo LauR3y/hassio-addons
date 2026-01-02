@@ -23,5 +23,5 @@ COPY --from=aider-source /venv /opt/aider-venv
 # Add aider to PATH
 ENV PATH="/opt/aider-venv/bin:${PATH}"
 
-# Copy root filesystem
+# Copy root filesystem - v0.1.3
 COPY rootfs /
