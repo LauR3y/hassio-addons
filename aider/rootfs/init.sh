@@ -66,7 +66,30 @@ echo "[INFO] Model: ${MODEL:-sonnet}"
 INTERFACE="${SUPERVISOR_INTERFACE:-0.0.0.0}"
 PORT="${SUPERVISOR_PORT:-7681}"
 
+# Create a script to manage tmux sessions
+cat > /tmp/aider-tmux.sh << TMUXEOF
+#!/bin/bash
+cd /config
+
+# If no tmux session exists, create one with first aider
+if ! tmux has-session -t aider 2>/dev/null; then
+    exec tmux new-session -s aider "$AIDER_CMD"
+fi
+
+# Session exists - create new window with another aider agent
+WINDOW_NUM=\$(tmux list-windows -t aider | wc -l)
+tmux new-window -t aider -n "aider-\$WINDOW_NUM" "$AIDER_CMD"
+exec tmux attach-session -t aider
+TMUXEOF
+chmod +x /tmp/aider-tmux.sh
+
+echo "[INFO] Tmux shortcuts:"
+echo "[INFO]   Ctrl+B, N - next agent window"
+echo "[INFO]   Ctrl+B, P - previous agent window"
+echo "[INFO]   Ctrl+B, 0-9 - switch to window by number"
+echo "[INFO]   Ctrl+B, D - detach (keeps agents running)"
+
 exec ttyd -i "$INTERFACE" -p "$PORT" -W \
     -t "titleFixed=Aider - AI Coding Assistant" \
     -t "reconnect=3" \
-    bash -c "cd /config && $AIDER_CMD"
+    /tmp/aider-tmux.sh
