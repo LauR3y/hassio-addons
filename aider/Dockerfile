@@ -25,5 +25,3 @@ ENV PATH="/opt/aider-venv/bin:${PATH}"
 
 # Copy root filesystem
 COPY rootfs /
-
-WORKDIR /homeassistant
