@@ -42,8 +42,8 @@ PORT="$(bashio::addon.ingress_port)"
 
 bashio::log.info "Starting ttyd on ${INTERFACE}:${PORT} with model ${MODEL}"
 
-# Build aider command
-AIDER_CMD="aider --model ${MODEL}"
+# Build aider command with full path
+AIDER_CMD="/opt/aider-venv/bin/aider --model ${MODEL}"
 
 if bashio::config.true 'auto_commits'; then
     AIDER_CMD="${AIDER_CMD} --auto-commits"
