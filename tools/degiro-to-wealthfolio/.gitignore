@@ -1,2 +1,8 @@
 node_modules/
 package-lock.json
+
+# Personal exports — never commit a real Account.csv (contains financial data).
+Account.csv
+*.local.csv
+
+.DS_Store

@@ -40,6 +40,15 @@ Asserts against `fixtures/degiro-sample.csv`.
   BUY row with `fee` summed in.
 - Standalone rows (no Order Id) are classified as DIVIDEND, TAX (dividend
   withholding), DEPOSIT, WITHDRAWAL, or FEE (connection/exchange fees).
+- Both `iDEAL Deposit` / `iDEAL storting` (real money entering DeGiro from
+  your bank) and `Overboeking naar uw geldrekening bij flatexDEGIRO Bank`
+  (cash being swept into your flatex savings account, with or without the
+  `SE` suffix) are mapped to **DEPOSIT**. The `Overboeking van` direction
+  (cash returning from flatex to trading) is intentionally not classified
+  — it represents internal money flow, not a real outflow. **Caveat:**
+  this can double-count the same money when DeGiro auto-sweeps a fresh
+  iDEAL deposit to flatex moments later. Filter accordingly if your
+  Wealthfolio account models flatex+trading as one combined wallet.
 - Filters out FLATEX cash-sweep rows (`ISIN = NLFLATEXACNT`).
 - Skips `PRODUCTWIJZIGING` (product-change) rows — they're ISIN remaps with
   zero cash effect, not real trades.
@@ -48,6 +57,11 @@ Asserts against `fixtures/degiro-sample.csv`.
   is kept.
 - Tolerates DeGiro's mixed comma/period decimal style (`-33,90` and
   `-97.93` both appear in real exports).
+- **Resolves ISIN → ticker via OpenFIGI** so the `symbol` column is
+  populated (otherwise Wealthfolio flags every trade in the asset-review
+  step). Results cached at `~/.cache/degiro-to-wealthfolio/figi.json` so
+  repeat runs don't re-query. Pass `--no-figi` to skip the lookup. ISINs
+  are sent to `api.openfigi.com` over HTTPS.
 
 ## Limitations
 
@@ -58,6 +72,11 @@ Asserts against `fixtures/degiro-sample.csv`.
   to add them.
 - FX conversion legs are discarded. Fine for portfolio tracking, lossy for
   exact cash-balance reconciliation.
+- OpenFIGI returns the composite/primary listing's ticker. For Irish
+  ETFs (VWRL, etc.), that's often the German Xetra ticker (VGWL) rather
+  than the Amsterdam ticker. Wealthfolio's resolver handles the suffix
+  step on its own, but you may need to confirm the asset in the
+  asset-review step.
 
 ## Acknowledgments
 

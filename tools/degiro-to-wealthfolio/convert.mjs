@@ -5,6 +5,8 @@
 // cash-sweep filtering follow dickwolff/Export-To-Ghostfolio (MIT).
 
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { parse } from 'csv-parse/sync';
 
 export const LOCALES = {
@@ -20,7 +22,15 @@ export const LOCALES = {
       'DEGIRO Aansluitingskosten',
     ],
     fx:           ['Valuta Creditering', 'Valuta Debitering'],
-    deposit:      ['iDEAL Deposit', 'flatex storting'],
+    deposit: [
+      'iDEAL Deposit',
+      'iDEAL storting',
+      'flatex storting',
+      // Cash sweep TO flatex savings — treated as deposit per user's mental
+      // model (flatex is the canonical wealth account). Both legacy and SE
+      // (post-2024) phrasings.
+      'Overboeking naar uw geldrekening bij flatexDEGIRO Bank',
+    ],
     withdrawal:   ['Processed Flatex Withdrawal', 'flatex terugstorting'],
     cashSweep:    ['Cash Sweep Transfer'],
   },
@@ -173,15 +183,28 @@ function foldTradeGroup(group, table) {
   };
 }
 
+// Pulls the trailing `<number> <CCY>` token from descriptions like
+// "Overboeking naar uw geldrekening bij flatexDEGIRO Bank: 0,92 EUR".
+// Used for rows where the Mutatie column is empty and the cash amount
+// is encoded inside the description text.
+export function extractEmbeddedAmount(desc) {
+  const matches = [...desc.matchAll(/([\d.,]+)\s+([A-Z]{3})\b/g)];
+  if (matches.length === 0) return null;
+  const last = matches[matches.length - 1];
+  const amount = parseDecimal(last[1]);
+  if (amount == null) return null;
+  return { amount: Math.abs(amount), ccy: last[2] };
+}
+
 function classifyStandalone(r, table) {
   const desc = r[COL.desc] || '';
   const isin = r[COL.isin] || '';
-  const ccy = r[COL.mutCcy] || '';
-  const amt = parseDecimal(r[COL.mutVal]);
-  if (amt == null) return null;
   const date = isoDate(r[COL.date]);
-  const base = (type, amount) => ({
-    date, activityType: type, currency: ccy,
+  const mutCcy = r[COL.mutCcy] || '';
+  const mutAmt = parseDecimal(r[COL.mutVal]);
+
+  const make = (type, amount, currency) => ({
+    date, activityType: type, currency,
     symbol: '', isin, quantity: '', unitPrice: '',
     amount: String(amount), fee: '', comment: desc,
   });
@@ -190,12 +213,111 @@ function classifyStandalone(r, table) {
   // withdrawal ships as `flatex terugstorting` (negative, cash leaves) +
   // `Processed Flatex Withdrawal` (positive, ack from bank). Only the
   // actual cash-flow side is kept.
-  if (table.dividendTax.some(d => desc.includes(d))) return amt < 0 ? base('TAX', Math.abs(amt)) : null;
-  if (table.dividend.some(d => desc.includes(d)))    return amt > 0 ? base('DIVIDEND', amt) : null;
-  if (table.deposit.some(d => desc.includes(d)))     return amt > 0 ? base('DEPOSIT', amt) : null;
-  if (table.withdrawal.some(d => desc.includes(d))) return amt < 0 ? base('WITHDRAWAL', Math.abs(amt)) : null;
-  if (table.fee.some(d => desc.includes(d)))         return amt < 0 ? base('FEE', Math.abs(amt)) : null;
+  if (mutAmt != null) {
+    if (table.dividendTax.some(d => desc.includes(d))) return mutAmt < 0 ? make('TAX', Math.abs(mutAmt), mutCcy) : null;
+    if (table.dividend.some(d => desc.includes(d)))    return mutAmt > 0 ? make('DIVIDEND', mutAmt, mutCcy) : null;
+    if (table.deposit.some(d => desc.includes(d)))     return mutAmt > 0 ? make('DEPOSIT', mutAmt, mutCcy) : null;
+    if (table.withdrawal.some(d => desc.includes(d))) return mutAmt < 0 ? make('WITHDRAWAL', Math.abs(mutAmt), mutCcy) : null;
+    if (table.fee.some(d => desc.includes(d)))         return mutAmt < 0 ? make('FEE', Math.abs(mutAmt), mutCcy) : null;
+    return null;
+  }
+
+  // No Mutatie value — fall back to amount embedded in the description.
+  // Currently only used by the flatex `Overboeking naar` sweep rows.
+  if (table.deposit.some(d => desc.includes(d))) {
+    const e = extractEmbeddedAmount(desc);
+    return e ? make('DEPOSIT', e.amount, e.ccy) : null;
+  }
   return null;
+}
+
+// ----------------------------------------------------------------------------
+// ISIN -> ticker resolution via OpenFIGI (free, no API key needed).
+// Cached on disk so repeat runs don't re-query.
+// ----------------------------------------------------------------------------
+
+export function cachePath() {
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  return path.join(base, 'degiro-to-wealthfolio', 'figi.json');
+}
+
+function loadCache() {
+  try { return JSON.parse(fs.readFileSync(cachePath(), 'utf8')); }
+  catch { return {}; }
+}
+
+function saveCache(cache) {
+  const p = cachePath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(cache, null, 2));
+}
+
+async function defaultFetcher(isins) {
+  const body = isins.map(isin => ({ idType: 'ID_ISIN', idValue: isin }));
+  const res = await fetch('https://api.openfigi.com/v3/mapping', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`OpenFIGI HTTP ${res.status}: ${await res.text()}`);
+  }
+  return res.json();
+}
+
+// Pick the best ticker from OpenFIGI's mapping array. OpenFIGI returns multiple
+// listings for cross-listed securities. We want the bare home-exchange ticker
+// (e.g. "VICI" on NYSE, not "1KN" on Frankfurt) because Wealthfolio's resolver
+// then appends an exchange suffix based on the activity currency.
+//
+// OpenFIGI marks the composite/primary listing with figi === compositeFIGI;
+// take that. Otherwise fall back to the first entry that has a ticker.
+function bestTicker(mappings) {
+  if (!Array.isArray(mappings) || mappings.length === 0) return '';
+  const equity = mappings.filter(m => m.ticker && m.marketSector === 'Equity');
+  const pool = equity.length > 0 ? equity : mappings.filter(m => m.ticker);
+  const composite = pool.find(m => m.figi && m.figi === m.compositeFIGI);
+  return (composite || pool[0])?.ticker || '';
+}
+
+export async function resolveSymbols(rows, opts = {}) {
+  const log = opts.log || (() => {});
+  const fetcher = opts.fetcher || defaultFetcher;
+  const cache = opts.cache || loadCache();
+  const persist = opts.persist !== false;
+
+  const isins = [...new Set(rows.map(r => r.isin).filter(Boolean))];
+  const missing = isins.filter(i => !(i in cache));
+
+  if (missing.length > 0) {
+    log(`Looking up ${missing.length} ISIN(s) via OpenFIGI...`);
+    // OpenFIGI free tier: 10 mappings per request, 25 reqs/min.
+    let anyResolved = false;
+    for (let i = 0; i < missing.length; i += 10) {
+      const batch = missing.slice(i, i + 10);
+      try {
+        const result = await fetcher(batch);
+        for (let j = 0; j < batch.length; j++) {
+          const ticker = bestTicker(result[j]?.data);
+          // Cache the empty result too so subsequent runs don't re-query
+          // ISINs that OpenFIGI genuinely doesn't know.
+          cache[batch[j]] = { ticker };
+          if (ticker) anyResolved = true;
+        }
+      } catch (e) {
+        log(`OpenFIGI lookup failed for batch: ${e.message} — symbols left blank, retrying next run`);
+        // Do NOT cache transient failures — let next run retry.
+      }
+    }
+    if (persist && anyResolved) saveCache(cache);
+  }
+
+  for (const r of rows) {
+    if (r.isin && !r.symbol && cache[r.isin]?.ticker) {
+      r.symbol = cache[r.isin].ticker;
+    }
+  }
+  return rows;
 }
 
 function toCsv(rows) {
@@ -208,20 +330,26 @@ function toCsv(rows) {
   return [header, ...body].join('\n') + '\n';
 }
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   if (argv.length === 0 || argv.includes('-h') || argv.includes('--help')) {
-    console.error('Usage: node convert.mjs <Account.csv> [-o output.csv]');
+    console.error('Usage: node convert.mjs <Account.csv> [-o output.csv] [--no-figi]');
     process.exit(2);
   }
   const oIdx = argv.indexOf('-o');
   const output = oIdx >= 0 ? argv[oIdx + 1] : '-';
-  const inputArg = argv.find(a => a !== '-o' && a !== output);
+  const skipFigi = argv.includes('--no-figi');
+  const inputArg = argv.find(a => !a.startsWith('-') && a !== output);
   const text = fs.readFileSync(inputArg, 'utf8');
   const rows = parseDegiro(text);
+  if (!skipFigi) {
+    await resolveSymbols(rows, { log: m => process.stderr.write(m + '\n') });
+  }
   const csv = toCsv(rows);
   if (output === '-') process.stdout.write(csv);
   else fs.writeFileSync(output, csv);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch(e => { console.error(e); process.exit(1); });
+}
