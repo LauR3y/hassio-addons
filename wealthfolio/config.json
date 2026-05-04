@@ -1,0 +1,34 @@
+{
+  "name": "Wealthfolio",
+  "version": "0.1.0",
+  "slug": "wealthfolio",
+  "description": "Self-hosted portfolio & finance tracker (https://wealthfolio.app)",
+  "url": "https://github.com/afadil/wealthfolio",
+  "arch": ["aarch64", "amd64"],
+  "init": false,
+  "startup": "application",
+  "boot": "auto",
+  "panel_icon": "mdi:chart-line",
+  "panel_title": "Wealthfolio",
+  "webui": "http://[HOST]:[PORT:8088]/",
+  "ports": {
+    "8088/tcp": 8088
+  },
+  "ports_description": {
+    "8088/tcp": "Wealthfolio web UI"
+  },
+  "options": {
+    "password": "",
+    "secret_key": "",
+    "cors_allow_origins": "http://homeassistant.local:8088",
+    "auth_token_ttl_minutes": 60,
+    "log_level": "info"
+  },
+  "schema": {
+    "password": "password",
+    "secret_key": "password?",
+    "cors_allow_origins": "str?",
+    "auth_token_ttl_minutes": "int(1,1440)?",
+    "log_level": "list(trace|debug|info|warn|error)?"
+  }
+}

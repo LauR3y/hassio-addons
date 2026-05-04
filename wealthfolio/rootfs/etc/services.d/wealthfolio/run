@@ -1,0 +1,41 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Wealthfolio
+# Service script: load generated secrets, export config-derived env, exec server.
+# ==============================================================================
+set -e
+
+OPTIONS_FILE=/data/options.json
+RUNTIME_DIR=/var/run/wealthfolio
+
+WF_SECRET_KEY="$(cat "${RUNTIME_DIR}/secret_key")"
+WF_AUTH_PASSWORD_HASH="$(cat "${RUNTIME_DIR}/password_hash")"
+export WF_SECRET_KEY WF_AUTH_PASSWORD_HASH
+
+export WF_LISTEN_ADDR="0.0.0.0:8088"
+export WF_DB_PATH="/data/wealthfolio.db"
+export WF_STATIC_DIR="/app/dist"
+export WF_SECRET_FILE="/data/secrets.json"
+
+opt() {
+    jq -r --arg k "$1" '.[$k] // empty' "${OPTIONS_FILE}"
+}
+
+CORS="$(opt cors_allow_origins)"
+if [ -n "${CORS}" ]; then
+    export WF_CORS_ALLOW_ORIGINS="${CORS}"
+fi
+
+TTL="$(opt auth_token_ttl_minutes)"
+if [ -n "${TTL}" ]; then
+    export WF_AUTH_TOKEN_TTL_MINUTES="${TTL}"
+fi
+
+LOG_LEVEL="$(opt log_level)"
+if [ -n "${LOG_LEVEL}" ]; then
+    export RUST_LOG="${LOG_LEVEL}"
+fi
+
+bashio::log.info "Starting Wealthfolio on ${WF_LISTEN_ADDR} (CORS=${WF_CORS_ALLOW_ORIGINS:-<unset>})"
+cd /app
+exec /usr/local/bin/wealthfolio-server
