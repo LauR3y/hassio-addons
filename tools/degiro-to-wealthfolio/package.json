@@ -1,0 +1,18 @@
+{
+  "name": "degiro-to-wealthfolio",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "degiro-to-wealthfolio": "./convert.mjs"
+  },
+  "scripts": {
+    "test": "node --test convert.test.mjs"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6"
+  }
+}
