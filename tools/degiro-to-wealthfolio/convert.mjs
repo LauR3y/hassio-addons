@@ -14,17 +14,37 @@ export const LOCALES = {
     headerSignature: 'Datum',
     buyPrefix:    ['Koop'],
     sellPrefix:   ['Verkoop'],
-    dividend:     ['Dividend'],
-    dividendTax:  ['Dividendbelasting'],
+    // Cash inflow: capital distributions (REIT-style) bucket with dividends.
+    dividend: [
+      'Dividend',
+      'Kapitaalsuitkering',
+    ],
+    // Cash outflow taxes (dividend withholding + transaction taxes + VAT).
+    tax: [
+      'Dividendbelasting',
+      'Transactiebelasting België',
+      'B.T.W.',
+    ],
+    interest: [
+      'Flatex Interest Income',
+      'Flatex Interest',
+      'Inkomsten uit Securities Lending',
+    ],
     fee: [
       'Transactiekosten en/of kosten van derden',
       'Aansluitingskosten',
       'DEGIRO Aansluitingskosten',
+      'DEGIRO Exchange Connection Fee',
+      'ADR/GDR Externe Kosten',
+      'Trustly/Sofort Storting Kosten',
+      'Service-fee',
     ],
     fx:           ['Valuta Creditering', 'Valuta Debitering'],
     deposit: [
       'iDEAL Deposit',
       'iDEAL storting',
+      'Sofort Deposit',
+      'flatex Deposit',
       'flatex storting',
       // Cash sweep TO flatex savings — treated as deposit per user's mental
       // model (flatex is the canonical wealth account). Both legacy and SE
@@ -38,12 +58,16 @@ export const LOCALES = {
     headerSignature: 'Date',
     buyPrefix:    ['Buy'],
     sellPrefix:   ['Sell'],
-    dividend:     ['Dividend'],
-    dividendTax:  ['Dividend Tax'],
+    dividend:     ['Dividend', 'Capital Distribution'],
+    tax:          ['Dividend Tax'],
+    interest:     ['Interest Income', 'Securities Lending Income'],
     fee: [
       'Transaction and/or third party costs',
       'Connection fee',
       'DEGIRO Connection fee',
+      'DEGIRO Exchange Connection Fee',
+      'ADR/GDR External Costs',
+      'Service-fee',
     ],
     fx:           ['FX Credit', 'FX Debit', 'Currency Credit', 'Currency Debit'],
     deposit:      ['Deposit'],
@@ -54,6 +78,11 @@ export const LOCALES = {
 
 // "Koop 12,5 @ 79,35 EUR" / "Buy 1 @ 33.9 USD"
 const TRADE_RE = /^(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
+
+// "WIJZIGING ISIN: Koop 16 @ 5,55 EUR" — DeGiro corporate-action re-issuance
+// of the same position under a new ISIN. Treated as a real BUY/SELL of the
+// respective ISIN; cash impact matches the row's Mutatie value.
+const WIJZIGING_RE = /^WIJZIGING\s+ISIN\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
 
 const WF_COLS = [
   'date', 'activityType', 'currency', 'symbol', 'isin',
@@ -133,43 +162,90 @@ export function parseDegiro(csvText) {
 
   const out = [];
   for (const group of groups.values()) {
-    const wf = foldTradeGroup(group, table);
-    if (wf) out.push(wf);
+    for (const wf of foldTradeGroup(group, table)) out.push(wf);
   }
   for (const r of standalone) {
     const wf = classifyStandalone(r, table);
     if (wf) out.push(wf);
   }
   out.sort((a, b) => a.date.localeCompare(b.date));
-  return out;
+  return dropOrphanWijzigingSells(out);
 }
 
+// DeGiro's `WIJZIGING ISIN: Verkoop ...` rows describe a sell of an
+// intermediate ISIN that was created by a corporate action we may not see
+// in this export window (e.g. TUI: original TUAG000 → intermediate TUAG1E4
+// → new TUAG505, where the original→intermediate transition happened in
+// an earlier rights issue). Emitting these SELLs creates a negative
+// position on the intermediate ISIN that Wealthfolio rejects.
+//
+// Drop a WIJZIGING SELL only if the running balance on its ISIN would go
+// below zero — preserving well-formed pairs (e.g. TPG's same-ISIN BUY+SELL).
+function dropOrphanWijzigingSells(rows) {
+  const balance = new Map();
+  const skip = new Set();
+  for (const r of rows) {
+    if ((r.activityType !== 'BUY' && r.activityType !== 'SELL') || !r.isin) continue;
+    const delta = (r.activityType === 'BUY' ? 1 : -1) * Number(r.quantity);
+    const next = (balance.get(r.isin) || 0) + delta;
+    if (next < 0 && /WIJZIGING ISIN/.test(r.comment)) {
+      skip.add(r);
+      continue;
+    }
+    balance.set(r.isin, next);
+  }
+  return rows.filter(r => !skip.has(r));
+}
+
+// Returns the array of Wealthfolio rows derived from a trade group:
+//   [BUY/SELL]         — asset row with fee folded
+//   [TAX, TAX, ...]    — any transaction-tax rows in the group (Belgian TOB,
+//                        Dutch BTW) emitted separately so they appear in
+//                        Wealthfolio's TAX category.
+// Group members not matched by any keyword (FX legs, cash-sweep siblings)
+// are dropped.
 function foldTradeGroup(group, table) {
   const verbs = [...table.buyPrefix, ...table.sellPrefix];
   const assetRow = group.find(r => {
     const desc = r[COL.desc] || '';
     return verbs.some(p => desc.startsWith(p));
   });
-  if (!assetRow) return null;
+  if (!assetRow) return [];
   const m = (assetRow[COL.desc] || '').match(TRADE_RE);
-  if (!m) return null;
+  if (!m) return [];
 
   const isBuy = table.buyPrefix.includes(m.groups.verb);
   const qty = parseDecimal(m.groups.qty);
   const price = parseDecimal(m.groups.price);
-  if (qty == null || price == null || qty === 0) return null;
+  if (qty == null || price == null || qty === 0) return [];
   const ccy = m.groups.ccy;
 
   let feeTotal = 0;
+  const taxRows = [];
   for (const r of group) {
     const desc = r[COL.desc] || '';
     if (table.fee.some(label => desc.includes(label))) {
       const v = parseDecimal(r[COL.mutVal]);
       if (v != null) feeTotal += Math.abs(v);
+    } else if (table.tax.some(label => desc.includes(label))) {
+      const v = parseDecimal(r[COL.mutVal]);
+      if (v == null || v >= 0) continue;
+      taxRows.push({
+        date: isoDate(r[COL.date]),
+        activityType: 'TAX',
+        currency: r[COL.mutCcy] || '',
+        symbol: '',
+        isin: r[COL.isin] || '',
+        quantity: '',
+        unitPrice: '',
+        amount: String(Math.abs(v)),
+        fee: '',
+        comment: desc,
+      });
     }
   }
 
-  return {
+  const trade = {
     date: isoDate(assetRow[COL.date]),
     activityType: isBuy ? 'BUY' : 'SELL',
     currency: ccy,
@@ -181,6 +257,7 @@ function foldTradeGroup(group, table) {
     fee: feeTotal ? feeTotal.toFixed(2) : '',
     comment: assetRow[COL.desc] || '',
   };
+  return [trade, ...taxRows];
 }
 
 // Pulls the trailing `<number> <CCY>` token from descriptions like
@@ -209,13 +286,39 @@ function classifyStandalone(r, table) {
     amount: String(amount), fee: '', comment: desc,
   });
 
+  // WIJZIGING ISIN — corporate-action re-issuance under a new ISIN. Emit as
+  // a real BUY (Koop) or SELL (Verkoop) of the row's ISIN. May create a
+  // negative position on the OLD ISIN if the original purchase under that
+  // intermediate ISIN happened via an even earlier corporate action that
+  // isn't in this CSV; that's a known data-completeness limit.
+  const wm = desc.match(WIJZIGING_RE);
+  if (wm) {
+    const verb = wm.groups.verb;
+    const isBuy = table.buyPrefix.includes(verb);
+    const isSell = table.sellPrefix.includes(verb);
+    if (isBuy || isSell) {
+      const qty = parseDecimal(wm.groups.qty);
+      const price = parseDecimal(wm.groups.price);
+      if (qty == null || price == null || qty === 0) return null;
+      return {
+        date, activityType: isBuy ? 'BUY' : 'SELL', currency: wm.groups.ccy,
+        symbol: '', isin, quantity: String(qty), unitPrice: String(price),
+        amount: '', fee: '', comment: desc,
+      };
+    }
+  }
+
   // Sign-aware classification de-duplicates DeGiro's paired rows (e.g. a
   // withdrawal ships as `flatex terugstorting` (negative, cash leaves) +
   // `Processed Flatex Withdrawal` (positive, ack from bank). Only the
   // actual cash-flow side is kept.
+  //
+  // Order matters: `tax` before `dividend` so `Dividendbelasting` (which
+  // contains the substring "Dividend") doesn't fall into the dividend bucket.
   if (mutAmt != null) {
-    if (table.dividendTax.some(d => desc.includes(d))) return mutAmt < 0 ? make('TAX', Math.abs(mutAmt), mutCcy) : null;
+    if (table.tax.some(d => desc.includes(d)))         return mutAmt < 0 ? make('TAX', Math.abs(mutAmt), mutCcy) : null;
     if (table.dividend.some(d => desc.includes(d)))    return mutAmt > 0 ? make('DIVIDEND', mutAmt, mutCcy) : null;
+    if (table.interest.some(d => desc.includes(d)))    return make('INTEREST', Math.abs(mutAmt), mutCcy);
     if (table.deposit.some(d => desc.includes(d)))     return mutAmt > 0 ? make('DEPOSIT', mutAmt, mutCcy) : null;
     if (table.withdrawal.some(d => desc.includes(d))) return mutAmt < 0 ? make('WITHDRAWAL', Math.abs(mutAmt), mutCcy) : null;
     if (table.fee.some(d => desc.includes(d)))         return mutAmt < 0 ? make('FEE', Math.abs(mutAmt), mutCcy) : null;

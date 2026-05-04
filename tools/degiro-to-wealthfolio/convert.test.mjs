@@ -227,9 +227,170 @@ test('iDEAL storting (Dutch label) → DEPOSIT', () => {
 test('LOCALES table is well-formed', () => {
   for (const [code, t] of Object.entries(LOCALES)) {
     assert.ok(t.headerSignature, `${code} missing headerSignature`);
-    for (const k of ['buyPrefix', 'sellPrefix', 'dividend', 'dividendTax',
+    for (const k of ['buyPrefix', 'sellPrefix', 'dividend', 'tax', 'interest',
                      'fee', 'fx', 'deposit', 'withdrawal', 'cashSweep']) {
       assert.ok(Array.isArray(t[k]), `${code}.${k} not an array`);
     }
   }
+});
+
+// Helper: build a synthetic 1-row Account.csv (NL header) and return the
+// converter output as a single row object.
+function nl1(desc, mutCcy = 'EUR', mutVal = '0,00', isin = '', orderId = '') {
+  const escape = v => /[",]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  const cells = ['01-01-2025', '12:00', '01-01-2025', '', isin, desc, '', mutCcy, mutVal, 'EUR', '0,00', orderId];
+  const row = cells.map(escape).join(',');
+  const text = 'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id\n' + row + '\n';
+  const out = parseDegiro(text);
+  return out[0] || null;
+}
+
+test('Transactiebelasting België → TAX', () => {
+  const r = nl1('Transactiebelasting België', 'EUR', '-1,63', 'US0231351067');
+  assert.equal(r.activityType, 'TAX');
+  assert.equal(r.amount, '1.63');
+  assert.equal(r.currency, 'EUR');
+});
+
+test('B.T.W. → TAX', () => {
+  const r = nl1('B.T.W.', 'EUR', '-0,21');
+  assert.equal(r.activityType, 'TAX');
+  assert.equal(r.amount, '0.21');
+});
+
+test('Kapitaalsuitkering → DIVIDEND', () => {
+  const r = nl1('Kapitaalsuitkering', 'USD', '1,76', 'US7561091049');
+  assert.equal(r.activityType, 'DIVIDEND');
+  assert.equal(r.amount, '1.76');
+  assert.equal(r.currency, 'USD');
+});
+
+test('Flatex Interest Income → INTEREST (zero amount allowed)', () => {
+  const r = nl1('Flatex Interest Income', 'EUR', '0,00');
+  assert.equal(r.activityType, 'INTEREST');
+  assert.equal(r.amount, '0');
+});
+
+test('Flatex Interest → INTEREST', () => {
+  const r = nl1('Flatex Interest', 'EUR', '5,42');
+  assert.equal(r.activityType, 'INTEREST');
+  assert.equal(r.amount, '5.42');
+});
+
+test('Inkomsten uit Securities Lending → INTEREST', () => {
+  const r = nl1('Inkomsten uit Securities Lending - Maart', 'EUR', '2,17');
+  assert.equal(r.activityType, 'INTEREST');
+  assert.equal(r.amount, '2.17');
+});
+
+test('Sofort Deposit → DEPOSIT', () => {
+  const r = nl1('Sofort Deposit', 'EUR', '500,00');
+  assert.equal(r.activityType, 'DEPOSIT');
+  assert.equal(r.amount, '500');
+});
+
+test('flatex Deposit → DEPOSIT', () => {
+  const r = nl1('flatex Deposit', 'EUR', '250,00');
+  assert.equal(r.activityType, 'DEPOSIT');
+  assert.equal(r.amount, '250');
+});
+
+test('Service-fee → FEE', () => {
+  const r = nl1('Service-fee', 'EUR', '-0,06');
+  assert.equal(r.activityType, 'FEE');
+  assert.equal(r.amount, '0.06');
+});
+
+test('ADR/GDR Externe Kosten → FEE', () => {
+  const r = nl1('ADR/GDR Externe Kosten', 'EUR', '-1,30', 'US62914V1061');
+  assert.equal(r.activityType, 'FEE');
+  assert.equal(r.amount, '1.3');
+});
+
+test('Trustly/Sofort Storting Kosten → FEE', () => {
+  const r = nl1('Trustly/Sofort Storting Kosten', 'EUR', '-0,50');
+  assert.equal(r.activityType, 'FEE');
+  assert.equal(r.amount, '0.5');
+});
+
+test('DEGIRO Exchange Connection Fee → FEE', () => {
+  const r = nl1('DEGIRO Exchange Connection Fee 2024 (Nasdaq - NDQ)', 'EUR', '-2,50');
+  assert.equal(r.activityType, 'FEE');
+  assert.equal(r.amount, '2.5');
+});
+
+test('WIJZIGING ISIN: Koop → BUY with qty/price from description', () => {
+  const r = nl1('WIJZIGING ISIN: Koop 16 @ 5,55 EUR', 'EUR', '-88,80', 'DE000TUAG505');
+  assert.equal(r.activityType, 'BUY');
+  assert.equal(r.quantity, '16');
+  assert.equal(r.unitPrice, '5.55');
+  assert.equal(r.currency, 'EUR');
+  assert.equal(r.isin, 'DE000TUAG505');
+});
+
+test('orphan WIJZIGING SELL is dropped when no prior position exists', () => {
+  // The TUI case: a WIJZIGING Verkoop of an ISIN that has no prior BUY in
+  // the export window. The corresponding WIJZIGING Koop on the new ISIN
+  // must still emit normally.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2025,09:00,01-01-2025,TUI AG - NON TRADEABLE,DE000TUAG1E4,"WIJZIGING ISIN: Verkoop 16 @ 5,55 EUR",,EUR,"88,80",EUR,"4,57",',
+    '01-01-2025,09:00,01-01-2025,TUI AG,DE000TUAG505,"WIJZIGING ISIN: Koop 16 @ 5,55 EUR",,EUR,"-88,80",EUR,"-84,23",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  // Only the BUY of the new ISIN should remain; orphan SELL is dropped.
+  assert.equal(out.length, 1);
+  assert.equal(out[0].activityType, 'BUY');
+  assert.equal(out[0].isin, 'DE000TUAG505');
+});
+
+test('balanced WIJZIGING pair on same ISIN is preserved (TPG case)', () => {
+  // TPG case: BUY then SELL of same ISIN. Running balance is 0 at the end
+  // but never goes negative — both rows must survive.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2025,09:00,01-01-2025,TPG PACE,KYG8990D1253,"WIJZIGING ISIN: Koop 26 @ 10,02 USD",,USD,"-260,52",USD,"0,00",',
+    '01-01-2025,10:00,01-01-2025,TPG PACE,KYG8990D1253,"WIJZIGING ISIN: Verkoop 26 @ 10,02 USD",,USD,"260,52",USD,"260,52",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  assert.equal(out.length, 2);
+  assert.equal(out.filter(r => r.activityType === 'BUY').length, 1);
+  assert.equal(out.filter(r => r.activityType === 'SELL').length, 1);
+});
+
+test('Transactiebelasting België inside a trade group emits a separate TAX row', () => {
+  // A real BUY trade group with an embedded Belgian TOB row sharing the
+  // Order Id. Should yield exactly two output rows: BUY and TAX.
+  const orderId = 'fc99ea8c-9b99-493c-abe9-66bef3de2757';
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    `01-01-2025,12:00,01-01-2025,AMAZON.COM INC,US0231351067,"Koop 1 @ 200,00 EUR",,EUR,"-200,00",EUR,"800,00",${orderId}`,
+    `01-01-2025,12:00,01-01-2025,AMAZON.COM INC,US0231351067,DEGIRO Transactiekosten en/of kosten van derden,,EUR,"-1,00",EUR,"799,00",${orderId}`,
+    `01-01-2025,12:00,01-01-2025,AMAZON.COM INC,US0231351067,Transactiebelasting België,,EUR,"-1,63",EUR,"797,37",${orderId}`,
+  ].join('\n');
+  const out = parseDegiro(text);
+  assert.equal(out.length, 2, `expected 2 rows, got ${out.length}`);
+  const buy = out.find(r => r.activityType === 'BUY');
+  const tax = out.find(r => r.activityType === 'TAX');
+  assert.ok(buy);
+  assert.equal(buy.fee, '1.00');
+  assert.ok(tax);
+  assert.equal(tax.amount, '1.63');
+  assert.equal(tax.isin, 'US0231351067');
+});
+
+test('WIJZIGING ISIN: Verkoop → SELL with qty/price from description', () => {
+  // Need a prior BUY of the same ISIN so the orphan-WIJZIGING dropper
+  // doesn't filter the SELL.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2024,09:00,01-01-2024,TUI AG,DE000TUAG1E4,"Koop 16 @ 5,00 EUR",,EUR,"-80,00",EUR,"100,00",abc',
+    '01-01-2025,09:00,01-01-2025,TUI AG,DE000TUAG1E4,"WIJZIGING ISIN: Verkoop 16 @ 5,55 EUR",,EUR,"88,80",EUR,"4,57",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  const sell = out.find(r => r.activityType === 'SELL');
+  assert.ok(sell, 'expected SELL row');
+  assert.equal(sell.quantity, '16');
+  assert.equal(sell.unitPrice, '5.55');
+  assert.equal(sell.isin, 'DE000TUAG1E4');
 });

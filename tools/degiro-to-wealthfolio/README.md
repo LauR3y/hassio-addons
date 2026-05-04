@@ -38,8 +38,22 @@ Asserts against `fixtures/degiro-sample.csv`.
 - Groups rows by `Order Id`. A typical buy ships as 4 rows (asset trade,
   FX debit, FX credit, transaction fee) — folded into a single Wealthfolio
   BUY row with `fee` summed in.
-- Standalone rows (no Order Id) are classified as DIVIDEND, TAX (dividend
-  withholding), DEPOSIT, WITHDRAWAL, or FEE (connection/exchange fees).
+- Standalone rows (no Order Id) are classified as DIVIDEND (incl. capital
+  distributions / `Kapitaalsuitkering`), TAX (dividend withholding,
+  Belgian transaction tax / `Transactiebelasting België`, Dutch VAT /
+  `B.T.W.`), INTEREST (`Flatex Interest [Income]`,
+  `Inkomsten uit Securities Lending`), DEPOSIT (`iDEAL Deposit/storting`,
+  `Sofort Deposit`, `flatex Deposit`), WITHDRAWAL, or FEE
+  (connection/exchange, `ADR/GDR Externe Kosten`, `Service-fee`,
+  `Trustly/Sofort Storting Kosten`).
+- Trade-group rows (those sharing an Order Id with a BUY/SELL) emit the
+  asset trade plus a separate TAX row for any embedded transaction-tax
+  charge (e.g. Belgian TOB attached to an Amazon purchase).
+- `WIJZIGING ISIN: Koop/Verkoop N @ X CCY` rows (DeGiro corporate-action
+  ISIN re-issuance) emit as real BUY/SELL trades. **Orphan SELLs**
+  (intermediate ISINs with no prior position in the export) are dropped
+  to avoid Wealthfolio rejecting the import; balanced same-ISIN pairs are
+  preserved.
 - Both `iDEAL Deposit` / `iDEAL storting` (real money entering DeGiro from
   your bank) and `Overboeking naar uw geldrekening bij flatexDEGIRO Bank`
   (cash being swept into your flatex savings account, with or without the
