@@ -371,9 +371,35 @@ async function defaultFetcher(isins) {
   return res.json();
 }
 
-// Preferred OpenFIGI exchange codes per activity currency. Most-relevant
-// first; we pick the first match that's actually present in the mapping
-// list. EUR is opinionated for Dutch DeGiro users (Euronext Amsterdam first).
+// Home exchange preference by ISIN country prefix. For most stocks the
+// canonical Yahoo Finance ticker lives on the home market — even when the
+// user trades a foreign listing, Yahoo quotes the home exchange and
+// Wealthfolio handles the FX conversion.
+const HOME_EXCHANGES_BY_COUNTRY = {
+  US: ['UN', 'UW', 'UA', 'UR', 'US', 'UQ', 'UP', 'UB'],
+  JP: ['JP', 'JT'],
+  GB: ['LN'],
+  FR: ['FP'],
+  DE: ['GR', 'GY', 'GF', 'XE'],
+  IT: ['IM'],
+  ES: ['SM', 'MC'],
+  NL: ['NA'],
+  BE: ['BB'],
+  CH: ['SW'],
+  AU: ['AT', 'AU'],
+  CA: ['CT', 'CN'],
+  HK: ['HK'],
+  CN: ['CG', 'CH'],
+};
+
+// Offshore fund domiciles — these ISIN prefixes don't correspond to a real
+// trading venue (UCITS ETFs are issued in IE/JE/LU but trade everywhere).
+// Use the activity currency to pick the user's actual venue instead.
+const OFFSHORE_FUND_DOMICILES = new Set(['IE', 'JE', 'LU', 'KY', 'GG', 'BM']);
+
+// Currency-based preferred exchanges, used as a fallback when the ISIN
+// country isn't informative. EUR is opinionated for Dutch DeGiro users
+// (Euronext Amsterdam first).
 const PREFERRED_EXCHANGES_BY_CURRENCY = {
   EUR: ['NA', 'BB', 'GR', 'GY', 'GF', 'XE', 'FP', 'IM', 'EO', 'E1'],
   USD: ['UN', 'UW', 'UA', 'UR', 'US', 'UQ', 'UP', 'UB'],
@@ -386,6 +412,14 @@ const PREFERRED_EXCHANGES_BY_CURRENCY = {
   HKD: ['HK'],
   SEK: ['SS'],
 };
+
+function preferredExchangesFor(isin, activityCurrency) {
+  const country = isin?.slice(0, 2);
+  if (country && !OFFSHORE_FUND_DOMICILES.has(country) && HOME_EXCHANGES_BY_COUNTRY[country]) {
+    return HOME_EXCHANGES_BY_COUNTRY[country];
+  }
+  return PREFERRED_EXCHANGES_BY_CURRENCY[activityCurrency] || [];
+}
 
 // Pick the best ticker from OpenFIGI's mapping array. OpenFIGI returns multiple
 // listings for cross-listed securities. We want the ticker on the exchange
@@ -407,13 +441,13 @@ function isAlphabetic(m) {
   return /^[A-Z]+$/.test(m.ticker);
 }
 
-export function bestTicker(mappings, activityCurrency) {
+export function bestTicker(mappings, activityCurrency, isin) {
   if (!Array.isArray(mappings) || mappings.length === 0) return '';
   const equity = mappings.filter(m => m.ticker && m.marketSector === 'Equity');
   const pool = equity.length > 0 ? equity : mappings.filter(m => m.ticker);
   if (pool.length === 0) return '';
 
-  const preferred = PREFERRED_EXCHANGES_BY_CURRENCY[activityCurrency] || [];
+  const preferred = preferredExchangesFor(isin, activityCurrency);
   const tiers = [
     pool.filter(m => isClean(m) && isAlphabetic(m)),
     pool.filter(isClean),
@@ -435,6 +469,10 @@ export function bestTicker(mappings, activityCurrency) {
   return fallback || '';
 }
 
+// Bump when bestTicker logic changes meaningfully. Old cache entries with a
+// different (or missing) version are silently re-queried.
+export const CACHE_VERSION = 3;
+
 export async function resolveSymbols(rows, opts = {}) {
   const log = opts.log || (() => {});
   const fetcher = opts.fetcher || defaultFetcher;
@@ -452,11 +490,10 @@ export async function resolveSymbols(rows, opts = {}) {
   }
 
   const isins = [...isinCurrency.keys()];
-  // A cache entry needs to match the currency hint; if a previous run
-  // resolved an ISIN with a different (or missing) currency, re-query.
   const missing = isins.filter(i => {
     const cached = cache[i];
     if (!cached) return true;
+    if (cached.v !== CACHE_VERSION) return true;
     return cached.currency !== isinCurrency.get(i);
   });
 
@@ -471,10 +508,8 @@ export async function resolveSymbols(rows, opts = {}) {
         for (let j = 0; j < batch.length; j++) {
           const isin = batch[j];
           const currency = isinCurrency.get(isin);
-          const ticker = bestTicker(result[j]?.data, currency);
-          // Cache empty results too, keyed by currency, so next run doesn't
-          // re-query ISINs OpenFIGI genuinely doesn't know.
-          cache[isin] = { ticker, currency };
+          const ticker = bestTicker(result[j]?.data, currency, isin);
+          cache[isin] = { ticker, currency, v: CACHE_VERSION };
           if (ticker) anyResolved = true;
         }
       } catch (e) {

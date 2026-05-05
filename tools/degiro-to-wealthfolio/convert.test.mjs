@@ -11,6 +11,7 @@ import {
   resolveSymbols,
   extractEmbeddedAmount,
   bestTicker,
+  CACHE_VERSION,
   LOCALES,
 } from './convert.mjs';
 
@@ -116,53 +117,90 @@ test('emits ISO dates and sorted ascending', () => {
 
 test('resolveSymbols populates symbol from a mocked OpenFIGI cache', async () => {
   const sample = parseDegiro(fs.readFileSync(fixturePath, 'utf8'));
-  // Cache must include matching currency hints to be considered fresh.
+  // Cache entries must match both currency hint AND CACHE_VERSION to be
+  // considered fresh. Without v, they get re-queried.
+  const v = CACHE_VERSION;
   const cache = {
-    US9256521090: { ticker: 'VICI', currency: 'USD' },
-    IE00B3RBWM25: { ticker: 'VWRA', currency: 'EUR' },
-    US1912161007: { ticker: 'KO',   currency: 'USD' },
+    US9256521090: { ticker: 'VICI', currency: 'USD', v },
+    IE00B3RBWM25: { ticker: 'VWRA', currency: 'EUR', v },
+    US1912161007: { ticker: 'KO',   currency: 'USD', v },
   };
+  let fetcherCalled = false;
   await resolveSymbols(sample, {
     cache,
     persist: false,
-    fetcher: async () => { throw new Error('should not be called'); },
+    fetcher: async () => { fetcherCalled = true; return []; },
   });
+  // The three explicitly cached ISINs should NOT trigger a fetch.
   const vici = sample.find(r => r.isin === 'US9256521090');
   assert.equal(vici.symbol, 'VICI');
   const vwrl = sample.find(r => r.isin === 'IE00B3RBWM25');
   assert.equal(vwrl.symbol, 'VWRA');
 });
 
-test('bestTicker prefers Euronext Amsterdam (NA) for EUR activities', () => {
-  // Synthetic OpenFIGI response shaped like the real PHAG ETF: composite
-  // primary on Xetra (PHAGEUR) but Amsterdam listing carries the bare ticker.
+test('resolveSymbols invalidates cache entries that are missing CACHE_VERSION', async () => {
+  const sample = parseDegiro(fs.readFileSync(fixturePath, 'utf8'));
+  // Pre-populate cache with an entry that has no version field — must be
+  // re-queried.
+  const cache = {};
+  for (const r of sample) {
+    if (r.isin) cache[r.isin] = { ticker: 'STALE', currency: r.currency };
+  }
+  let calls = 0;
+  await resolveSymbols(sample, {
+    cache,
+    persist: false,
+    fetcher: async (isins) => {
+      calls++;
+      return isins.map(() => ({ data: [{
+        ticker: 'FRESH', exchCode: 'NA', marketSector: 'Equity',
+        figi: 'A', compositeFIGI: 'A',
+      }] }));
+    },
+  });
+  assert.ok(calls > 0, 'expected fetcher to be invoked for unversioned cache');
+});
+
+test('bestTicker for offshore-fund ISIN uses currency-based exchange (PHAG case)', () => {
+  // ISIN JE00... is Jersey (offshore fund domicile) so we fall back to
+  // EUR currency preference. Amsterdam wins.
   const mappings = [
     { ticker: 'PHAGEUR', exchCode: 'EO', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
-    { ticker: 'PHAGEUR', exchCode: 'XE', marketSector: 'Equity', figi: 'B', compositeFIGI: 'A' },
     { ticker: 'PHAG', exchCode: 'NA', marketSector: 'Equity', figi: 'C', compositeFIGI: 'C' },
-    { ticker: 'PHAG', exchCode: 'LN', marketSector: 'Equity', figi: 'D', compositeFIGI: 'C' },
+    { ticker: 'PHAG', exchCode: 'LN', marketSector: 'Equity', figi: 'D', compositeFIGI: 'D' },
   ];
-  assert.equal(bestTicker(mappings, 'EUR'), 'PHAG');
+  assert.equal(bestTicker(mappings, 'EUR', 'JE00B1VS3333'), 'PHAG');
 });
 
-test('bestTicker prefers NYSE (UN) for USD activities', () => {
+test('bestTicker for US-domiciled ISIN prefers US exchange even when traded in EUR (BABA case)', () => {
+  // ISIN US01609W1027 is US-domiciled (Alibaba ADR). Even if the user
+  // traded the EU listing in EUR, we want BABA on UN/US — that's what
+  // Yahoo Finance quotes.
   const mappings = [
-    { ticker: 'VICI', exchCode: 'US', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
-    { ticker: '1KN',  exchCode: 'GR', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
-    { ticker: 'VICI', exchCode: 'UN', marketSector: 'Equity', figi: 'C', compositeFIGI: 'A' },
+    { ticker: 'BABA', exchCode: 'UN', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+    { ticker: 'AHLA', exchCode: 'GR', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
   ];
-  assert.equal(bestTicker(mappings, 'USD'), 'VICI');
+  assert.equal(bestTicker(mappings, 'EUR', 'US01609W1027'), 'BABA');
 });
 
-test('bestTicker falls back to composite primary when no preferred exchange match', () => {
+test('bestTicker for JP-domiciled ISIN prefers Tokyo over US OTC (Toyota case)', () => {
+  const mappings = [
+    { ticker: 'TOYOF', exchCode: 'UQ', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+    { ticker: 'TOYOY', exchCode: 'UN', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
+    { ticker: '7203',  exchCode: 'JT', marketSector: 'Equity', figi: 'C', compositeFIGI: 'C' },
+  ];
+  assert.equal(bestTicker(mappings, 'JPY', 'JP3633400001'), '7203');
+});
+
+test('bestTicker falls back to first non-empty tier when no preferred exchange matches', () => {
   const mappings = [
     { ticker: 'XYZ', exchCode: 'XX', marketSector: 'Equity', figi: 'A', compositeFIGI: 'B' },
     { ticker: 'XYZ', exchCode: 'YY', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
   ];
-  assert.equal(bestTicker(mappings, 'EUR'), 'XYZ');
+  assert.equal(bestTicker(mappings, 'EUR', 'IE00B0000001'), 'XYZ');
 });
 
-test('bestTicker handles unknown currency by falling back to composite', () => {
+test('bestTicker handles unknown currency / no ISIN by falling back gracefully', () => {
   const mappings = [
     { ticker: 'AAA', exchCode: 'XX', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
   ];
