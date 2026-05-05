@@ -452,6 +452,22 @@ test('STOCK SPLIT priced -> BUY/SELL (TUI reverse split)', () => {
   assert.equal(split.unitPrice, '1.858');
 });
 
+test('DELISTING: Verkoop @ 0 USD -> TRANSFER_OUT (closes dissolved-SPAC position)', () => {
+  // Need a prior BUY so the orphan filter doesn't drop our SELL.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2021,09:00,01-01-2021,TPG,KYG8990D1253,"Koop 26 @ 11,90 USD",,USD,"-309,40",USD,"100,00",abc',
+    '13-10-2022,10:02,12-10-2022,TPG,KYG8990D1253,"DELISTING: Verkoop 26 @ 0 USD",,USD,"0,00",USD,"0,00",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  const buy = out.find(r => r.activityType === 'BUY');
+  const out_ = out.find(r => r.activityType === 'TRANSFER_OUT');
+  assert.ok(buy);
+  assert.ok(out_);
+  assert.equal(out_.quantity, '26');
+  assert.equal(out_.unitPrice, '0');
+});
+
 test('Verrekening van Aandelen -> CREDIT (positive cash settlement)', () => {
   const r = nl1('Verrekening van Aandelen', 'EUR', '7,78', 'CNE100000296');
   assert.equal(r.activityType, 'CREDIT');

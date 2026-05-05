@@ -88,8 +88,9 @@ const TRADE_RE = /^(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<c
 //   WIJZIGING ISIN: Koop 16 @ 5,55 EUR        — ISIN re-issuance (price > 0)
 //   STOCK SPLIT: Verkoop 85 @ 1,858 EUR       — split with cash leg
 //   CLAIMEMISSIE: Koop 8 @ 0 EUR              — rights issue / bonus shares
+//   DELISTING: Verkoop 26 @ 0 USD             — SPAC dissolution / delisting
 const CORPORATE_ACTION_RE =
-  /^(?:WIJZIGING\s+ISIN|STOCK\s+SPLIT|CLAIMEMISSIE)\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
+  /^(?:WIJZIGING\s+ISIN|STOCK\s+SPLIT|CLAIMEMISSIE|DELISTING)\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
 
 const WF_COLS = [
   'date', 'activityType', 'currency', 'symbol', 'isin',
@@ -199,7 +200,7 @@ function dropOrphanWijzigingSells(rows) {
     const sign = (r.activityType === 'BUY' || r.activityType === 'TRANSFER_IN') ? 1 : -1;
     const delta = sign * Number(r.quantity);
     const next = (balance.get(r.isin) || 0) + delta;
-    if (next < 0 && /WIJZIGING ISIN|STOCK SPLIT|CLAIMEMISSIE/.test(r.comment)) {
+    if (next < 0 && /WIJZIGING ISIN|STOCK SPLIT|CLAIMEMISSIE|DELISTING/.test(r.comment)) {
       skip.add(r);
       continue;
     }
