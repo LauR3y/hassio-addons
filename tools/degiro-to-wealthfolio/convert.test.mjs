@@ -188,6 +188,24 @@ test('bestTicker for JP-domiciled ISIN prefers Tokyo with .T suffix (Toyota case
   assert.equal(bestTicker(mappings, 'JPY', 'JP3633400001'), '7203.T');
 });
 
+test('bestTicker falls back to currency exchanges when country home has no listing (BYD case)', () => {
+  // ISIN CNE100000296 (BYD): country home = CN mainland (CG, CH), but BYD
+  // doesn't trade on those mainland exchanges in OpenFIGI's mapping. The
+  // user buys via DeGiro on Tradegate (Frankfurt-affiliated) so we should
+  // fall through to EUR-currency preferred exchanges.
+  const mappings = [
+    { ticker: 'BYDDF', exchCode: 'US', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+    { ticker: 'BY6', exchCode: 'GR', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
+    { ticker: 'BY6', exchCode: 'TH', marketSector: 'Equity', figi: 'C', compositeFIGI: 'C' },
+    { ticker: '1211', exchCode: 'HK', marketSector: 'Equity', figi: 'D', compositeFIGI: 'D' },
+  ];
+  // BY6 is alphanumeric (has digit), so tier1 (alphabetic) only has BYDDF.
+  // Country exchanges (CG/CH) miss. EUR fallback puts NA, then GR — BY6 on
+  // GR is in tier2 (clean alphanumeric), tier-iter walks tier1 (no match)
+  // then tier2 (GR matches) → BY6.DE.
+  assert.equal(bestTicker(mappings, 'EUR', 'CNE100000296'), 'BY6.DE');
+});
+
 test('bestTicker for German stock uses .DE suffix', () => {
   const mappings = [
     { ticker: 'SAP', exchCode: 'GR', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },

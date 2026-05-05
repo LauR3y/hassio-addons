@@ -413,12 +413,18 @@ const PREFERRED_EXCHANGES_BY_CURRENCY = {
   SEK: ['SS'],
 };
 
+// Build preferred-exchange list: country-home first (so US/JP/DE stocks
+// stay on their primary venue regardless of trade currency), then
+// currency-based as fallback for cases where the home market isn't in
+// OpenFIGI's mapping (e.g. BYD's CNE ISIN — mainland CN exchanges are
+// listed but the user trades the German Tradegate listing in EUR).
 function preferredExchangesFor(isin, activityCurrency) {
   const country = isin?.slice(0, 2);
-  if (country && !OFFSHORE_FUND_DOMICILES.has(country) && HOME_EXCHANGES_BY_COUNTRY[country]) {
-    return HOME_EXCHANGES_BY_COUNTRY[country];
-  }
-  return PREFERRED_EXCHANGES_BY_CURRENCY[activityCurrency] || [];
+  const home = (country && !OFFSHORE_FUND_DOMICILES.has(country))
+    ? (HOME_EXCHANGES_BY_COUNTRY[country] || [])
+    : [];
+  const byCcy = PREFERRED_EXCHANGES_BY_CURRENCY[activityCurrency] || [];
+  return [...home, ...byCcy.filter(e => !home.includes(e))];
 }
 
 // Yahoo Finance exchange suffix per OpenFIGI exchCode. Empty string means
@@ -489,7 +495,7 @@ export function bestTicker(mappings, activityCurrency, isin) {
 
 // Bump when bestTicker logic changes meaningfully. Old cache entries with a
 // different (or missing) version are silently re-queried.
-export const CACHE_VERSION = 4;
+export const CACHE_VERSION = 5;
 
 export async function resolveSymbols(rows, opts = {}) {
   const log = opts.log || (() => {});
