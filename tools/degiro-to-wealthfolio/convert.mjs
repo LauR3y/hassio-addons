@@ -85,12 +85,17 @@ const TRADE_RE = /^(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<c
 // DeGiro corporate-action descriptions all share the same shape:
 //   "<KIND>: <Koop|Verkoop> <qty> @ <price> <CCY>"
 // Examples:
-//   WIJZIGING ISIN: Koop 16 @ 5,55 EUR        — ISIN re-issuance (price > 0)
-//   STOCK SPLIT: Verkoop 85 @ 1,858 EUR       — split with cash leg
-//   CLAIMEMISSIE: Koop 8 @ 0 EUR              — rights issue / bonus shares
-//   DELISTING: Verkoop 26 @ 0 USD             — SPAC dissolution / delisting
+//   WIJZIGING ISIN: Koop 16 @ 5,55 EUR              — ISIN re-issuance (price > 0)
+//   STOCK SPLIT: Verkoop 85 @ 1,858 EUR             — split with cash leg
+//   CLAIMEMISSIE: Koop 8 @ 0 EUR                    — rights issue / bonus shares
+//   DELISTING: Verkoop 26 @ 0 USD                   — SPAC dissolution / delisting
+//   OVERNAME: Verkoop 345 @ 1,7 USD                 — company takeover / buyout
+//   KAPITAALVERHOGING: Koop 16 @ 5,55 EUR           — capital increase / rights exercise
+//   Conversie geldmarktfonds: Koop 509,79 @ 0,98 EUR — money market fund conversion
 const CORPORATE_ACTION_RE =
-  /^(?:WIJZIGING\s+ISIN|STOCK\s+SPLIT|CLAIMEMISSIE|DELISTING)\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
+  /^(?:WIJZIGING\s+ISIN|STOCK\s+SPLIT|CLAIMEMISSIE|DELISTING|OVERNAME|KAPITAALVERHOGING|Conversie\s+geldmarktfonds)\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
+const CORPORATE_ACTION_COMMENT_RE =
+  /WIJZIGING ISIN|STOCK SPLIT|CLAIMEMISSIE|DELISTING|OVERNAME|KAPITAALVERHOGING|Conversie geldmarktfonds/;
 
 const WF_COLS = [
   'date', 'activityType', 'currency', 'symbol', 'isin',
@@ -200,7 +205,7 @@ function dropOrphanWijzigingSells(rows) {
     const sign = (r.activityType === 'BUY' || r.activityType === 'TRANSFER_IN') ? 1 : -1;
     const delta = sign * Number(r.quantity);
     const next = (balance.get(r.isin) || 0) + delta;
-    if (next < 0 && /WIJZIGING ISIN|STOCK SPLIT|CLAIMEMISSIE|DELISTING/.test(r.comment)) {
+    if (next < 0 && CORPORATE_ACTION_COMMENT_RE.test(r.comment)) {
       skip.add(r);
       continue;
     }
@@ -209,29 +214,28 @@ function dropOrphanWijzigingSells(rows) {
   return rows.filter(r => !skip.has(r));
 }
 
-// Returns the array of Wealthfolio rows derived from a trade group:
-//   [BUY/SELL]         — asset row with fee folded
-//   [TAX, TAX, ...]    — any transaction-tax rows in the group (Belgian TOB,
-//                        Dutch BTW) emitted separately so they appear in
-//                        Wealthfolio's TAX category.
-// Group members not matched by any keyword (FX legs, cash-sweep siblings)
-// are dropped.
+// Returns the array of Wealthfolio rows derived from a trade group. A
+// "trade group" is one shared Order Id; in normal cases that's a single
+// BUY/SELL plus its FX legs and fees. But DeGiro reuses the same Order
+// Id for cosmetic name-change events too (e.g. Allego "ALLEGO NV" ->
+// "ALLEGO N.V. ORDINARY SHARE - TD" emits Verkoop+Koop on the same ISIN
+// under one Order Id), so we emit one BUY/SELL per asset row found.
+//
+// Also emits separate TAX rows for any transaction-tax line in the group
+// (Belgian TOB / Dutch BTW) so the cash impact is captured.
 function foldTradeGroup(group, table) {
-  const verbs = [...table.buyPrefix, ...table.sellPrefix];
-  const assetRow = group.find(r => {
+  const buyVerbs = new Set(table.buyPrefix);
+  const sellVerbs = new Set(table.sellPrefix);
+
+  const assetRows = group.filter(r => {
     const desc = r[COL.desc] || '';
-    return verbs.some(p => desc.startsWith(p));
+    for (const v of buyVerbs) if (desc.startsWith(v)) return true;
+    for (const v of sellVerbs) if (desc.startsWith(v)) return true;
+    return false;
   });
-  if (!assetRow) return [];
-  const m = (assetRow[COL.desc] || '').match(TRADE_RE);
-  if (!m) return [];
+  if (assetRows.length === 0) return [];
 
-  const isBuy = table.buyPrefix.includes(m.groups.verb);
-  const qty = parseDecimal(m.groups.qty);
-  const price = parseDecimal(m.groups.price);
-  if (qty == null || price == null || qty === 0) return [];
-  const ccy = m.groups.ccy;
-
+  // Sum fees once for the whole group; attach to the FIRST asset row only.
   let feeTotal = 0;
   const taxRows = [];
   for (const r of group) {
@@ -257,19 +261,29 @@ function foldTradeGroup(group, table) {
     }
   }
 
-  const trade = {
-    date: isoDate(assetRow[COL.date]),
-    activityType: isBuy ? 'BUY' : 'SELL',
-    currency: ccy,
-    symbol: '',
-    isin: assetRow[COL.isin] || '',
-    quantity: String(qty),
-    unitPrice: String(price),
-    amount: '',
-    fee: feeTotal ? feeTotal.toFixed(2) : '',
-    comment: assetRow[COL.desc] || '',
-  };
-  return [trade, ...taxRows];
+  const trades = [];
+  for (let i = 0; i < assetRows.length; i++) {
+    const assetRow = assetRows[i];
+    const m = (assetRow[COL.desc] || '').match(TRADE_RE);
+    if (!m) continue;
+    const isBuy = buyVerbs.has(m.groups.verb);
+    const qty = parseDecimal(m.groups.qty);
+    const price = parseDecimal(m.groups.price);
+    if (qty == null || price == null || qty === 0) continue;
+    trades.push({
+      date: isoDate(assetRow[COL.date]),
+      activityType: isBuy ? 'BUY' : 'SELL',
+      currency: m.groups.ccy,
+      symbol: '',
+      isin: assetRow[COL.isin] || '',
+      quantity: String(qty),
+      unitPrice: String(price),
+      amount: '',
+      fee: i === 0 && feeTotal ? feeTotal.toFixed(2) : '',
+      comment: assetRow[COL.desc] || '',
+    });
+  }
+  return [...trades, ...taxRows];
 }
 
 // Pulls the trailing `<number> <CCY>` token from descriptions like

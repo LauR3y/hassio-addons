@@ -468,6 +468,58 @@ test('STOCK SPLIT priced -> BUY/SELL (TUI reverse split)', () => {
   assert.equal(split.unitPrice, '1.858');
 });
 
+test('OVERNAME: Verkoop @ price -> SELL (company takeover)', () => {
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2024,09:00,01-01-2024,X,NL0015000TA9,"Koop 345 @ 1,69 USD",,USD,"-583,05",USD,"100,00",abc',
+    '06-08-2024,09:08,05-08-2024,X,NL0015000TA9,"OVERNAME: Verkoop 345 @ 1,7 USD",,USD,"586,50",USD,"586,50",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  const sell = out.find(r => r.activityType === 'SELL');
+  assert.ok(sell);
+  assert.equal(sell.quantity, '345');
+  assert.equal(sell.unitPrice, '1.7');
+});
+
+test('KAPITAALVERHOGING: Koop @ price -> BUY (rights exercise)', () => {
+  const r = nl1('KAPITAALVERHOGING: Koop 16 @ 5,55 EUR', 'EUR', '-88,80', 'DE000TUAG1E4');
+  assert.equal(r.activityType, 'BUY');
+  assert.equal(r.quantity, '16');
+  assert.equal(r.unitPrice, '5.55');
+});
+
+test('Conversie geldmarktfonds Koop+Verkoop pair on same ISIN both emit', () => {
+  // Money-market fund conversion: fractional-share buys followed by a sell
+  // of the full accumulated position. The full real sequence has an interest
+  // top-up Koop in between; without it the orphan-corporate-action filter
+  // drops the trailing sell because the running balance goes negative.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '15-01-2021,12:03,14-01-2021,EUR CASH FUND,NL0010661914,"Conversie geldmarktfonds: Koop 509,7879 @ 0,9807 EUR",,EUR,"-0,36",EUR,"100,00",',
+    '19-01-2021,12:04,18-01-2021,EUR CASH FUND,NL0010661914,"Conversie geldmarktfonds: Koop 0,052 @ 0,9807 EUR",,,,EUR,"100,00",',
+    '01-03-2021,15:45,26-02-2021,EUR CASH FUND,NL0010661914,"Conversie geldmarktfonds: Verkoop 509,8399 @ 0,98 EUR",,,,EUR,"100,00",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  assert.equal(out.filter(r => r.activityType === 'BUY').length, 2);
+  assert.equal(out.filter(r => r.activityType === 'SELL').length, 1);
+});
+
+test('foldTradeGroup emits BOTH Koop and Verkoop when same Order Id has both (Allego TD case)', () => {
+  // DeGiro reuses Order Id for cosmetic name-change events: a single
+  // group can contain BOTH Verkoop and Koop on the same ISIN. Both must
+  // emit so the running balance is preserved.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '29-07-2024,12:59,29-07-2024,ALLEGO NV,NL0015000TA9,"Verkoop 345 @ 1,69 USD",,USD,"583,05",USD,"583,05",abc',
+    '29-07-2024,12:59,29-07-2024,ALLEGO TD,NL0015000TA9,"Koop 345 @ 1,69 USD",,USD,"-583,05",USD,"0,00",abc',
+  ].join('\n');
+  const out = parseDegiro(text);
+  assert.equal(out.filter(r => r.activityType === 'BUY').length, 1);
+  assert.equal(out.filter(r => r.activityType === 'SELL').length, 1);
+  assert.equal(out.filter(r => r.activityType === 'BUY')[0].quantity, '345');
+  assert.equal(out.filter(r => r.activityType === 'SELL')[0].quantity, '345');
+});
+
 test('DELISTING: Verkoop @ 0 USD -> TRANSFER_OUT (closes dissolved-SPAC position)', () => {
   // Need a prior BUY so the orphan filter doesn't drop our SELL.
   const text = [
