@@ -371,19 +371,68 @@ async function defaultFetcher(isins) {
   return res.json();
 }
 
+// Preferred OpenFIGI exchange codes per activity currency. Most-relevant
+// first; we pick the first match that's actually present in the mapping
+// list. EUR is opinionated for Dutch DeGiro users (Euronext Amsterdam first).
+const PREFERRED_EXCHANGES_BY_CURRENCY = {
+  EUR: ['NA', 'BB', 'GR', 'GY', 'GF', 'XE', 'FP', 'IM', 'EO', 'E1'],
+  USD: ['UN', 'UW', 'UA', 'UR', 'US', 'UQ', 'UP', 'UB'],
+  GBP: ['LN'],
+  GBp: ['LN'],
+  CHF: ['SW'],
+  JPY: ['JP', 'JT'],
+  CAD: ['CT', 'CN'],
+  AUD: ['AT', 'AU'],
+  HKD: ['HK'],
+  SEK: ['SS'],
+};
+
 // Pick the best ticker from OpenFIGI's mapping array. OpenFIGI returns multiple
-// listings for cross-listed securities. We want the bare home-exchange ticker
-// (e.g. "VICI" on NYSE, not "1KN" on Frankfurt) because Wealthfolio's resolver
-// then appends an exchange suffix based on the activity currency.
+// listings for cross-listed securities. We want the ticker on the exchange
+// the user actually trades on — that's the one Yahoo Finance / Wealthfolio's
+// resolver knows how to quote. Currency hint comes from the user's activity.
 //
-// OpenFIGI marks the composite/primary listing with figi === compositeFIGI;
-// take that. Otherwise fall back to the first entry that has a ticker.
-function bestTicker(mappings) {
+// Strategy: rank entries into tiers, then for each tier try the preferred
+// exchanges for the activity currency, falling back to composite/first.
+//   Tier 1: alphabetic ticker, no currency suffix (PHAG, BTEK, VICI).
+//   Tier 2: any clean (no currency suffix) ticker — accepts numeric ones
+//           like Toyota's 7203 on Tokyo.
+//   Tier 3: anything (BTEKUSD, PHAGEUR — Yahoo can't quote these but
+//           something is better than nothing for the user to manually fix).
+const CCY_SUFFIX_RE = /(EUR|USD|GBP|GBX|GBp|CHF|JPY|CAD|AUD|HKD|SEK)$/;
+function isClean(m) {
+  return !(m.ticker.length > 3 && CCY_SUFFIX_RE.test(m.ticker));
+}
+function isAlphabetic(m) {
+  return /^[A-Z]+$/.test(m.ticker);
+}
+
+export function bestTicker(mappings, activityCurrency) {
   if (!Array.isArray(mappings) || mappings.length === 0) return '';
   const equity = mappings.filter(m => m.ticker && m.marketSector === 'Equity');
   const pool = equity.length > 0 ? equity : mappings.filter(m => m.ticker);
-  const composite = pool.find(m => m.figi && m.figi === m.compositeFIGI);
-  return (composite || pool[0])?.ticker || '';
+  if (pool.length === 0) return '';
+
+  const preferred = PREFERRED_EXCHANGES_BY_CURRENCY[activityCurrency] || [];
+  const tiers = [
+    pool.filter(m => isClean(m) && isAlphabetic(m)),
+    pool.filter(isClean),
+    pool,
+  ];
+
+  // Search every tier for a preferred-exchange match before bailing out.
+  // This lets Toyota's tier2 entry on Tokyo (`7203`, numeric) outrank
+  // tier1's US OTC fluff (`TOYOF`).
+  let fallback = null;
+  for (const tier of tiers) {
+    if (tier.length === 0) continue;
+    if (fallback === null) fallback = tier[0].ticker;
+    for (const exch of preferred) {
+      const match = tier.find(m => m.exchCode === exch);
+      if (match) return match.ticker;
+    }
+  }
+  return fallback || '';
 }
 
 export async function resolveSymbols(rows, opts = {}) {
@@ -392,8 +441,24 @@ export async function resolveSymbols(rows, opts = {}) {
   const cache = opts.cache || loadCache();
   const persist = opts.persist !== false;
 
-  const isins = [...new Set(rows.map(r => r.isin).filter(Boolean))];
-  const missing = isins.filter(i => !(i in cache));
+  // Per-ISIN currency hint, derived from the first activity row that uses
+  // each ISIN. Used by bestTicker to prefer the exchange listing matching
+  // the user's actual trading venue.
+  const isinCurrency = new Map();
+  for (const r of rows) {
+    if (r.isin && r.currency && !isinCurrency.has(r.isin)) {
+      isinCurrency.set(r.isin, r.currency);
+    }
+  }
+
+  const isins = [...isinCurrency.keys()];
+  // A cache entry needs to match the currency hint; if a previous run
+  // resolved an ISIN with a different (or missing) currency, re-query.
+  const missing = isins.filter(i => {
+    const cached = cache[i];
+    if (!cached) return true;
+    return cached.currency !== isinCurrency.get(i);
+  });
 
   if (missing.length > 0) {
     log(`Looking up ${missing.length} ISIN(s) via OpenFIGI...`);
@@ -404,10 +469,12 @@ export async function resolveSymbols(rows, opts = {}) {
       try {
         const result = await fetcher(batch);
         for (let j = 0; j < batch.length; j++) {
-          const ticker = bestTicker(result[j]?.data);
-          // Cache the empty result too so subsequent runs don't re-query
-          // ISINs that OpenFIGI genuinely doesn't know.
-          cache[batch[j]] = { ticker };
+          const isin = batch[j];
+          const currency = isinCurrency.get(isin);
+          const ticker = bestTicker(result[j]?.data, currency);
+          // Cache empty results too, keyed by currency, so next run doesn't
+          // re-query ISINs OpenFIGI genuinely doesn't know.
+          cache[isin] = { ticker, currency };
           if (ticker) anyResolved = true;
         }
       } catch (e) {

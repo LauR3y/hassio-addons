@@ -10,6 +10,7 @@ import {
   detectLocale,
   resolveSymbols,
   extractEmbeddedAmount,
+  bestTicker,
   LOCALES,
 } from './convert.mjs';
 
@@ -115,10 +116,11 @@ test('emits ISO dates and sorted ascending', () => {
 
 test('resolveSymbols populates symbol from a mocked OpenFIGI cache', async () => {
   const sample = parseDegiro(fs.readFileSync(fixturePath, 'utf8'));
+  // Cache must include matching currency hints to be considered fresh.
   const cache = {
-    US9256521090: { ticker: 'VICI' },
-    IE00B3RBWM25: { ticker: 'VWRA' },
-    US1912161007: { ticker: 'KO' },
+    US9256521090: { ticker: 'VICI', currency: 'USD' },
+    IE00B3RBWM25: { ticker: 'VWRA', currency: 'EUR' },
+    US1912161007: { ticker: 'KO',   currency: 'USD' },
   };
   await resolveSymbols(sample, {
     cache,
@@ -131,6 +133,48 @@ test('resolveSymbols populates symbol from a mocked OpenFIGI cache', async () =>
   assert.equal(vwrl.symbol, 'VWRA');
 });
 
+test('bestTicker prefers Euronext Amsterdam (NA) for EUR activities', () => {
+  // Synthetic OpenFIGI response shaped like the real PHAG ETF: composite
+  // primary on Xetra (PHAGEUR) but Amsterdam listing carries the bare ticker.
+  const mappings = [
+    { ticker: 'PHAGEUR', exchCode: 'EO', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+    { ticker: 'PHAGEUR', exchCode: 'XE', marketSector: 'Equity', figi: 'B', compositeFIGI: 'A' },
+    { ticker: 'PHAG', exchCode: 'NA', marketSector: 'Equity', figi: 'C', compositeFIGI: 'C' },
+    { ticker: 'PHAG', exchCode: 'LN', marketSector: 'Equity', figi: 'D', compositeFIGI: 'C' },
+  ];
+  assert.equal(bestTicker(mappings, 'EUR'), 'PHAG');
+});
+
+test('bestTicker prefers NYSE (UN) for USD activities', () => {
+  const mappings = [
+    { ticker: 'VICI', exchCode: 'US', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+    { ticker: '1KN',  exchCode: 'GR', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
+    { ticker: 'VICI', exchCode: 'UN', marketSector: 'Equity', figi: 'C', compositeFIGI: 'A' },
+  ];
+  assert.equal(bestTicker(mappings, 'USD'), 'VICI');
+});
+
+test('bestTicker falls back to composite primary when no preferred exchange match', () => {
+  const mappings = [
+    { ticker: 'XYZ', exchCode: 'XX', marketSector: 'Equity', figi: 'A', compositeFIGI: 'B' },
+    { ticker: 'XYZ', exchCode: 'YY', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
+  ];
+  assert.equal(bestTicker(mappings, 'EUR'), 'XYZ');
+});
+
+test('bestTicker handles unknown currency by falling back to composite', () => {
+  const mappings = [
+    { ticker: 'AAA', exchCode: 'XX', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+  ];
+  assert.equal(bestTicker(mappings, 'XYZ'), 'AAA');
+  assert.equal(bestTicker(mappings, undefined), 'AAA');
+});
+
+test('bestTicker returns empty string on empty / non-equity-only input', () => {
+  assert.equal(bestTicker([], 'EUR'), '');
+  assert.equal(bestTicker(null, 'EUR'), '');
+});
+
 test('resolveSymbols batches missing ISINs via the fetcher and caches results', async () => {
   const sample = parseDegiro(fs.readFileSync(fixturePath, 'utf8'));
   const seen = [];
@@ -139,8 +183,11 @@ test('resolveSymbols batches missing ISINs via the fetcher and caches results', 
     return isins.map(isin => ({
       data: [{
         ticker: isin.slice(-4),  // synthetic ticker so we can detect mapping
+        exchCode: 'NA',           // matches EUR preferred exchange
         marketSector: 'Equity',
         securityType2: 'Common Stock',
+        figi: 'F' + isin,
+        compositeFIGI: 'F' + isin,
       }],
     }));
   };
