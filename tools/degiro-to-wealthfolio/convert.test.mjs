@@ -185,32 +185,22 @@ test('extractEmbeddedAmount picks the trailing amount + currency', () => {
   assert.equal(extractEmbeddedAmount('Dividend'), null);
 });
 
-test('flatex Overboeking naar → DEPOSIT (amount from description)', () => {
-  const naar = rows.filter(r =>
-    r.activityType === 'DEPOSIT' && /Overboeking naar/.test(r.comment));
-  // Fixture has 2 `Overboeking naar` rows: 0,92 EUR and 0,4 EUR.
-  assert.equal(naar.length, 2);
-  const cents = naar.find(r => r.amount === '0.92');
-  assert.ok(cents);
-  assert.equal(cents.currency, 'EUR');
-});
-
-test('Overboeking VAN is intentionally NOT classified', () => {
+test('Overboeking naar/van uw geldrekening bij flatexDEGIRO Bank are dropped (internal sweeps)', () => {
+  // Both directions are internal cash sweeps between trading and flatex
+  // savings sub-accounts — must NOT appear in the output. The previous
+  // mapping of `naar` to DEPOSIT inflated cost basis 5× in real exports.
   for (const r of rows) {
-    assert.doesNotMatch(r.comment, /Overboeking van uw geldrekening/);
+    assert.doesNotMatch(r.comment, /Overboeking (van|naar) uw geldrekening bij flatexDEGIRO/);
   }
 });
 
-test('flatex Overboeking with .SE suffix is recognized as DEPOSIT', () => {
+test('flatex Overboeking with .SE suffix is also dropped', () => {
   const text = [
     'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
     '01-01-2025,12:00,01-01-2025,,,"Overboeking naar uw geldrekening bij flatexDEGIRO Bank SE: 5,00 EUR",,,,EUR,"100,00",',
   ].join('\n');
   const result = parseDegiro(text);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].activityType, 'DEPOSIT');
-  assert.equal(result[0].amount, '5');
-  assert.equal(result[0].currency, 'EUR');
+  assert.equal(result.length, 0);
 });
 
 test('iDEAL storting (Dutch label) → DEPOSIT', () => {

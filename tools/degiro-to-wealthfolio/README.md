@@ -29,7 +29,7 @@ Asserts against `fixtures/degiro-sample.csv`.
 - English (EN) — works
 - German / French / Italian / Spanish / Portuguese / Czech — extend
   `LOCALES` in `convert.mjs` (header signature + keyword tables for
-  `buyPrefix`, `sellPrefix`, `dividend`, `dividendTax`, `fee`, `fx`,
+  `buyPrefix`, `sellPrefix`, `dividend`, `tax`, `interest`, `fee`, `fx`,
   `deposit`, `withdrawal`, `cashSweep`).
 
 ## What it does
@@ -54,15 +54,15 @@ Asserts against `fixtures/degiro-sample.csv`.
   (intermediate ISINs with no prior position in the export) are dropped
   to avoid Wealthfolio rejecting the import; balanced same-ISIN pairs are
   preserved.
-- Both `iDEAL Deposit` / `iDEAL storting` (real money entering DeGiro from
-  your bank) and `Overboeking naar uw geldrekening bij flatexDEGIRO Bank`
-  (cash being swept into your flatex savings account, with or without the
-  `SE` suffix) are mapped to **DEPOSIT**. The `Overboeking van` direction
-  (cash returning from flatex to trading) is intentionally not classified
-  — it represents internal money flow, not a real outflow. **Caveat:**
-  this can double-count the same money when DeGiro auto-sweeps a fresh
-  iDEAL deposit to flatex moments later. Filter accordingly if your
-  Wealthfolio account models flatex+trading as one combined wallet.
+- Real-money deposits — `iDEAL Deposit` / `iDEAL storting` / `Sofort Deposit` /
+  `flatex Deposit` — are classified as **DEPOSIT**. Internal sweep rows
+  (`Overboeking van/naar uw geldrekening bij flatexDEGIRO Bank [SE]`,
+  both directions) are **dropped** because they describe cash movement
+  between the trading sub-account and the flatex savings sub-account, not
+  new money entering your overall broker relationship. An earlier version
+  classified `Overboeking naar` as DEPOSIT and that inflated cost basis ~5×
+  on real exports (Wealthfolio's account-row return read −78% even though
+  holdings were up).
 - Filters out FLATEX cash-sweep rows (`ISIN = NLFLATEXACNT`).
 - Skips `PRODUCTWIJZIGING` (product-change) rows — they're ISIN remaps with
   zero cash effect, not real trades.

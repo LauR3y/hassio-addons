@@ -46,10 +46,13 @@ export const LOCALES = {
       'Sofort Deposit',
       'flatex Deposit',
       'flatex storting',
-      // Cash sweep TO flatex savings — treated as deposit per user's mental
-      // model (flatex is the canonical wealth account). Both legacy and SE
-      // (post-2024) phrasings.
-      'Overboeking naar uw geldrekening bij flatexDEGIRO Bank',
+      // NOTE: `Overboeking van/naar uw geldrekening bij flatexDEGIRO Bank`
+      // is intentionally NOT in this list. Those rows are internal cash
+      // sweeps between the DeGiro trading sub-account and the flatex
+      // savings sub-account — not new money entering or leaving the user's
+      // overall broker relationship. Counting them as DEPOSIT inflates
+      // cost basis by ~5× because almost every euro deposited via iDEAL
+      // gets immediately swept to flatex.
     ],
     withdrawal:   ['Processed Flatex Withdrawal', 'flatex terugstorting'],
     cashSweep:    ['Cash Sweep Transfer'],
