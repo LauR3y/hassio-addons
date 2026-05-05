@@ -82,10 +82,14 @@ export const LOCALES = {
 // "Koop 12,5 @ 79,35 EUR" / "Buy 1 @ 33.9 USD"
 const TRADE_RE = /^(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
 
-// "WIJZIGING ISIN: Koop 16 @ 5,55 EUR" — DeGiro corporate-action re-issuance
-// of the same position under a new ISIN. Treated as a real BUY/SELL of the
-// respective ISIN; cash impact matches the row's Mutatie value.
-const WIJZIGING_RE = /^WIJZIGING\s+ISIN\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
+// DeGiro corporate-action descriptions all share the same shape:
+//   "<KIND>: <Koop|Verkoop> <qty> @ <price> <CCY>"
+// Examples:
+//   WIJZIGING ISIN: Koop 16 @ 5,55 EUR        — ISIN re-issuance (price > 0)
+//   STOCK SPLIT: Verkoop 85 @ 1,858 EUR       — split with cash leg
+//   CLAIMEMISSIE: Koop 8 @ 0 EUR              — rights issue / bonus shares
+const CORPORATE_ACTION_RE =
+  /^(?:WIJZIGING\s+ISIN|STOCK\s+SPLIT|CLAIMEMISSIE)\s*:\s*(?<verb>\w+)\s+(?<qty>[\d.,]+)\s*@\s*(?<price>[\d.,]+)\s+(?<ccy>[A-Z]{3})/;
 
 const WF_COLS = [
   'date', 'activityType', 'currency', 'symbol', 'isin',
@@ -182,16 +186,20 @@ export function parseDegiro(csvText) {
 // an earlier rights issue). Emitting these SELLs creates a negative
 // position on the intermediate ISIN that Wealthfolio rejects.
 //
-// Drop a WIJZIGING SELL only if the running balance on its ISIN would go
-// below zero — preserving well-formed pairs (e.g. TPG's same-ISIN BUY+SELL).
+// Drop a corporate-action SELL only if the running balance on its ISIN
+// would go below zero — preserving well-formed pairs (e.g. TPG's same-ISIN
+// BUY+SELL).
 function dropOrphanWijzigingSells(rows) {
   const balance = new Map();
   const skip = new Set();
   for (const r of rows) {
-    if ((r.activityType !== 'BUY' && r.activityType !== 'SELL') || !r.isin) continue;
-    const delta = (r.activityType === 'BUY' ? 1 : -1) * Number(r.quantity);
+    if ((r.activityType !== 'BUY' && r.activityType !== 'SELL'
+         && r.activityType !== 'TRANSFER_IN' && r.activityType !== 'TRANSFER_OUT')
+        || !r.isin) continue;
+    const sign = (r.activityType === 'BUY' || r.activityType === 'TRANSFER_IN') ? 1 : -1;
+    const delta = sign * Number(r.quantity);
     const next = (balance.get(r.isin) || 0) + delta;
-    if (next < 0 && /WIJZIGING ISIN/.test(r.comment)) {
+    if (next < 0 && /WIJZIGING ISIN|STOCK SPLIT|CLAIMEMISSIE/.test(r.comment)) {
       skip.add(r);
       continue;
     }
@@ -289,24 +297,46 @@ function classifyStandalone(r, table) {
     amount: String(amount), fee: '', comment: desc,
   });
 
-  // WIJZIGING ISIN — corporate-action re-issuance under a new ISIN. Emit as
-  // a real BUY (Koop) or SELL (Verkoop) of the row's ISIN. May create a
-  // negative position on the OLD ISIN if the original purchase under that
-  // intermediate ISIN happened via an even earlier corporate action that
-  // isn't in this CSV; that's a known data-completeness limit.
-  const wm = desc.match(WIJZIGING_RE);
-  if (wm) {
-    const verb = wm.groups.verb;
+  // Corporate actions: WIJZIGING ISIN / STOCK SPLIT / CLAIMEMISSIE. They all
+  // describe a share count change. Zero-price events (CLAIMEMISSIE and
+  // some STOCK SPLITs) emit TRANSFER_IN/TRANSFER_OUT so cost basis isn't
+  // diluted to wrong values. Priced events emit BUY/SELL just like a
+  // regular trade.
+  const cm = desc.match(CORPORATE_ACTION_RE);
+  if (cm) {
+    const verb = cm.groups.verb;
     const isBuy = table.buyPrefix.includes(verb);
     const isSell = table.sellPrefix.includes(verb);
     if (isBuy || isSell) {
-      const qty = parseDecimal(wm.groups.qty);
-      const price = parseDecimal(wm.groups.price);
+      const qty = parseDecimal(cm.groups.qty);
+      const price = parseDecimal(cm.groups.price);
       if (qty == null || price == null || qty === 0) return null;
+      let activityType;
+      if (price === 0) {
+        activityType = isBuy ? 'TRANSFER_IN' : 'TRANSFER_OUT';
+      } else {
+        activityType = isBuy ? 'BUY' : 'SELL';
+      }
       return {
-        date, activityType: isBuy ? 'BUY' : 'SELL', currency: wm.groups.ccy,
+        date, activityType, currency: cm.groups.ccy,
         symbol: '', isin, quantity: String(qty), unitPrice: String(price),
         amount: '', fee: '', comment: desc,
+      };
+    }
+  }
+
+  // Cash settlement of share fractions or position liquidation:
+  //   "Verrekening van Aandelen" / "Contante Verrekening Aandelen"
+  // The Mutatie is a positive EUR/USD amount; no share effect. Emit as
+  // CREDIT (Wealthfolio: "Cash credit; refunds, rebates, bonuses").
+  if (/^(?:Contante\s+Verrekening\s+Aandelen|Verrekening\s+van\s+Aandelen)/.test(desc)) {
+    const amt = parseDecimal(r[COL.mutVal]);
+    const ccy = r[COL.mutCcy] || '';
+    if (amt != null && amt > 0) {
+      return {
+        date, activityType: 'CREDIT', currency: ccy,
+        symbol: '', isin, quantity: '', unitPrice: '',
+        amount: String(amt), fee: '', comment: desc,
       };
     }
   }

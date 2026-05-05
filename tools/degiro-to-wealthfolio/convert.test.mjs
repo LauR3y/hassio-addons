@@ -425,6 +425,57 @@ test('WIJZIGING ISIN: Koop → BUY with qty/price from description', () => {
   assert.equal(r.isin, 'DE000TUAG505');
 });
 
+test('CLAIMEMISSIE: Koop @ 0 EUR -> TRANSFER_IN (free bonus shares)', () => {
+  const r = nl1('CLAIMEMISSIE: Koop 8 @ 0 EUR', 'EUR', '0,00', 'CNE100000296');
+  assert.equal(r.activityType, 'TRANSFER_IN');
+  assert.equal(r.quantity, '8');
+  assert.equal(r.unitPrice, '0');
+  assert.equal(r.isin, 'CNE100000296');
+});
+
+test('STOCK SPLIT priced -> BUY/SELL (TUI reverse split)', () => {
+  // Reverse split: 85 shares of old ISIN -> 8 shares of new ISIN.
+  const sell = nl1('STOCK SPLIT: Verkoop 85 @ 1,858 EUR', 'EUR', '157,93', 'DE000TUAG000');
+  // SELL gets dropped by orphan filter without prior BUY in this isolated
+  // single-row CSV — verify with a synthetic 2-row CSV that has a prior buy.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2020,09:00,01-01-2020,TUI AG,DE000TUAG000,"Koop 85 @ 5,00 EUR",,EUR,"-425,00",EUR,"100,00",abc',
+    '24-02-2023,08:02,24-02-2023,TUI AG,DE000TUAG000,"STOCK SPLIT: Verkoop 85 @ 1,858 EUR",,EUR,"157,93",EUR,"515,97",',
+    '24-02-2023,08:02,24-02-2023,TUI AG,DE000TUAG505,"STOCK SPLIT: Koop 8 @ 18,58 EUR",,EUR,"-148,64",EUR,"358,04",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  assert.equal(out.filter(r => r.activityType === 'BUY').length, 2);  // initial + split koop
+  assert.equal(out.filter(r => r.activityType === 'SELL').length, 1); // split verkoop survives (had +85)
+  const split = out.find(r => r.activityType === 'SELL' && /STOCK SPLIT/.test(r.comment));
+  assert.equal(split.quantity, '85');
+  assert.equal(split.unitPrice, '1.858');
+});
+
+test('Verrekening van Aandelen -> CREDIT (positive cash settlement)', () => {
+  const r = nl1('Verrekening van Aandelen', 'EUR', '7,78', 'CNE100000296');
+  assert.equal(r.activityType, 'CREDIT');
+  assert.equal(r.amount, '7.78');
+  assert.equal(r.currency, 'EUR');
+});
+
+test('Contante Verrekening Aandelen -> CREDIT (SPAC redemption)', () => {
+  const r = nl1('Contante Verrekening Aandelen', 'USD', '261,50', 'KYG8990D1253');
+  assert.equal(r.activityType, 'CREDIT');
+  assert.equal(r.amount, '261.5');
+});
+
+test('orphan corporate-action SELL is dropped (CLAIMEMISSIE/STOCK SPLIT also covered)', () => {
+  // SELL of an ISIN we have no prior position on — must drop regardless of
+  // which corporate-action prefix.
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2025,09:00,01-01-2025,X,XX0000000001,"STOCK SPLIT: Verkoop 10 @ 1,00 EUR",,EUR,"10,00",EUR,"10,00",',
+  ].join('\n');
+  const out = parseDegiro(text);
+  assert.equal(out.length, 0);
+});
+
 test('orphan WIJZIGING SELL is dropped when no prior position exists', () => {
   // The TUI case: a WIJZIGING Verkoop of an ISIN that has no prior BUY in
   // the export window. The corresponding WIJZIGING Koop on the new ISIN
