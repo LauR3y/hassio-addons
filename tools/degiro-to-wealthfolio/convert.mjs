@@ -576,8 +576,11 @@ export async function resolveSymbols(rows, opts = {}) {
   }
 
   for (const r of rows) {
-    if (r.isin && !r.symbol && cache[r.isin]?.ticker) {
-      r.symbol = cache[r.isin].ticker;
+    if (r.isin && !r.symbol) {
+      // Use OpenFIGI ticker if available, else fall back to the ISIN itself
+      // so Wealthfolio has a non-empty identifier (dissolved SPACs, delisted
+      // securities — OpenFIGI drops these mappings).
+      r.symbol = cache[r.isin]?.ticker || r.isin;
     }
   }
   return rows;

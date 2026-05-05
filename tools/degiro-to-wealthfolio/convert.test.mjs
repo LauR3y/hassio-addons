@@ -266,7 +266,7 @@ test('resolveSymbols batches missing ISINs via the fetcher and caches results', 
   }
 });
 
-test('resolveSymbols leaves symbol blank when fetcher fails', async () => {
+test('resolveSymbols falls back to ISIN when fetcher fails', async () => {
   const sample = parseDegiro(fs.readFileSync(fixturePath, 'utf8'));
   const fetcher = async () => { throw new Error('network down'); };
   const cache = {};
@@ -276,8 +276,24 @@ test('resolveSymbols leaves symbol blank when fetcher fails', async () => {
   });
   assert.ok(messages.some(m => /OpenFIGI lookup failed/.test(m)));
   for (const r of sample) {
-    assert.equal(r.symbol, '');
+    if (r.isin) assert.equal(r.symbol, r.isin, 'isin should be the fallback symbol');
   }
+});
+
+test('resolveSymbols falls back to ISIN when OpenFIGI returns no data', async () => {
+  const text = [
+    'Datum,Tijd,Valutadatum,Product,ISIN,Omschrijving,FX,Mutatie,,Saldo,,Order Id',
+    '01-01-2021,09:00,01-01-2021,DISSOLVED,KYG8990D1253,"Koop 26 @ 10,00 USD",,USD,"-260,00",USD,"100,00",abc',
+  ].join('\n');
+  const out = parseDegiro(text);
+  // Mock OpenFIGI returning empty data (matches its real behavior for
+  // dissolved/delisted ISINs).
+  await resolveSymbols(out, {
+    cache: {},
+    persist: false,
+    fetcher: async () => [{ data: [] }],
+  });
+  assert.equal(out[0].symbol, 'KYG8990D1253');
 });
 
 test('extractEmbeddedAmount picks the trailing amount + currency', () => {
