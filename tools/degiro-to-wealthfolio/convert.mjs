@@ -421,6 +421,24 @@ function preferredExchangesFor(isin, activityCurrency) {
   return PREFERRED_EXCHANGES_BY_CURRENCY[activityCurrency] || [];
 }
 
+// Yahoo Finance exchange suffix per OpenFIGI exchCode. Empty string means
+// "no suffix" (Yahoo's default — US listings). Without a suffix, Yahoo
+// would have to disambiguate between several markets that share a ticker
+// (e.g. PHAG on Amsterdam vs Milan vs London) and Wealthfolio's resolver
+// has been observed picking the wrong market (Tokyo for "PHAG").
+const YAHOO_SUFFIX_BY_EXCHANGE = {
+  UN: '', UW: '', UA: '', UR: '', US: '', UQ: '', UP: '', UB: '',
+  NA: '.AS',  BB: '.BR',  GR: '.DE',  GY: '.DE',  GF: '.DE',  XE: '.DE',
+  IM: '.MI',  FP: '.PA',  LN: '.L',   SS: '.ST',  SW: '.SW',
+  JP: '.T',   JT: '.T',   HK: '.HK',  AT: '.AX',  AU: '.AX',
+  CT: '.TO',  EU: '.AS',  EO: '.AS',  E1: '.AS',
+};
+
+function yahooSymbol(ticker, exchCode) {
+  const suffix = YAHOO_SUFFIX_BY_EXCHANGE[exchCode];
+  return suffix === undefined ? ticker : ticker + suffix;
+}
+
 // Pick the best ticker from OpenFIGI's mapping array. OpenFIGI returns multiple
 // listings for cross-listed securities. We want the ticker on the exchange
 // the user actually trades on — that's the one Yahoo Finance / Wealthfolio's
@@ -460,18 +478,18 @@ export function bestTicker(mappings, activityCurrency, isin) {
   let fallback = null;
   for (const tier of tiers) {
     if (tier.length === 0) continue;
-    if (fallback === null) fallback = tier[0].ticker;
+    if (fallback === null) fallback = tier[0];
     for (const exch of preferred) {
       const match = tier.find(m => m.exchCode === exch);
-      if (match) return match.ticker;
+      if (match) return yahooSymbol(match.ticker, match.exchCode);
     }
   }
-  return fallback || '';
+  return fallback ? yahooSymbol(fallback.ticker, fallback.exchCode) : '';
 }
 
 // Bump when bestTicker logic changes meaningfully. Old cache entries with a
 // different (or missing) version are silently re-queried.
-export const CACHE_VERSION = 3;
+export const CACHE_VERSION = 4;
 
 export async function resolveSymbols(rows, opts = {}) {
   const log = opts.log || (() => {});

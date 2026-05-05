@@ -162,20 +162,16 @@ test('resolveSymbols invalidates cache entries that are missing CACHE_VERSION', 
 });
 
 test('bestTicker for offshore-fund ISIN uses currency-based exchange (PHAG case)', () => {
-  // ISIN JE00... is Jersey (offshore fund domicile) so we fall back to
-  // EUR currency preference. Amsterdam wins.
+  // Output includes Yahoo suffix so Wealthfolio resolves unambiguously.
   const mappings = [
     { ticker: 'PHAGEUR', exchCode: 'EO', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
     { ticker: 'PHAG', exchCode: 'NA', marketSector: 'Equity', figi: 'C', compositeFIGI: 'C' },
     { ticker: 'PHAG', exchCode: 'LN', marketSector: 'Equity', figi: 'D', compositeFIGI: 'D' },
   ];
-  assert.equal(bestTicker(mappings, 'EUR', 'JE00B1VS3333'), 'PHAG');
+  assert.equal(bestTicker(mappings, 'EUR', 'JE00B1VS3333'), 'PHAG.AS');
 });
 
-test('bestTicker for US-domiciled ISIN prefers US exchange even when traded in EUR (BABA case)', () => {
-  // ISIN US01609W1027 is US-domiciled (Alibaba ADR). Even if the user
-  // traded the EU listing in EUR, we want BABA on UN/US — that's what
-  // Yahoo Finance quotes.
+test('bestTicker for US-domiciled ISIN prefers US exchange (no Yahoo suffix)', () => {
   const mappings = [
     { ticker: 'BABA', exchCode: 'UN', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
     { ticker: 'AHLA', exchCode: 'GR', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
@@ -183,13 +179,20 @@ test('bestTicker for US-domiciled ISIN prefers US exchange even when traded in E
   assert.equal(bestTicker(mappings, 'EUR', 'US01609W1027'), 'BABA');
 });
 
-test('bestTicker for JP-domiciled ISIN prefers Tokyo over US OTC (Toyota case)', () => {
+test('bestTicker for JP-domiciled ISIN prefers Tokyo with .T suffix (Toyota case)', () => {
   const mappings = [
     { ticker: 'TOYOF', exchCode: 'UQ', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
     { ticker: 'TOYOY', exchCode: 'UN', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
     { ticker: '7203',  exchCode: 'JT', marketSector: 'Equity', figi: 'C', compositeFIGI: 'C' },
   ];
-  assert.equal(bestTicker(mappings, 'JPY', 'JP3633400001'), '7203');
+  assert.equal(bestTicker(mappings, 'JPY', 'JP3633400001'), '7203.T');
+});
+
+test('bestTicker for German stock uses .DE suffix', () => {
+  const mappings = [
+    { ticker: 'SAP', exchCode: 'GR', marketSector: 'Equity', figi: 'A', compositeFIGI: 'A' },
+  ];
+  assert.equal(bestTicker(mappings, 'EUR', 'DE0007164600'), 'SAP.DE');
 });
 
 test('bestTicker falls back to first non-empty tier when no preferred exchange matches', () => {
@@ -197,6 +200,7 @@ test('bestTicker falls back to first non-empty tier when no preferred exchange m
     { ticker: 'XYZ', exchCode: 'XX', marketSector: 'Equity', figi: 'A', compositeFIGI: 'B' },
     { ticker: 'XYZ', exchCode: 'YY', marketSector: 'Equity', figi: 'B', compositeFIGI: 'B' },
   ];
+  // 'XX' isn't in YAHOO_SUFFIX_BY_EXCHANGE so no suffix is appended.
   assert.equal(bestTicker(mappings, 'EUR', 'IE00B0000001'), 'XYZ');
 });
 
