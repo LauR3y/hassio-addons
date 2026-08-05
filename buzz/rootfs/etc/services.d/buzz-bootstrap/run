@@ -76,6 +76,24 @@ fi
 
 # Members removed from the options list are left on the relay on purpose:
 # removal is destructive, and the owner can never be removed. Remove one with
-#   buzz-admin remove-member --pubkey <npub-or-hex>
+#   docker exec addon_<repo-hash>_buzz buzz-admin remove-member --pubkey <npub-or-hex>
+
+# The relay logs the pubkey of every REJECTED client but never the accepted ones,
+# which makes "not a relay member" hard to diagnose. Print the roster so both
+# sides of that comparison are in the same log.
+bashio::log.info "Relay roster — only these pubkeys may connect:"
+if ROSTER="$(s6-setuidgid buzz /usr/local/bin/buzz-admin list-members 2>/dev/null)"; then
+    # list-members prints a 160-column table: header, rule, then
+    # "<pubkey> <role> <added_by> <created_at>". Compact it to "role  pubkey".
+    printf '%s\n' "${ROSTER}" \
+        | awk 'NR>2 && NF>=2 {printf "  %-6s %s\n", $2, $1}' \
+        | while read -r line; do bashio::log.info "${line}"; done
+else
+    bashio::log.warning "Could not read the relay roster."
+fi
+bashio::log.info "A client whose pubkey is not listed above is rejected with 'not a relay member'."
+bashio::log.info "The web UI at ${RELAY_URL/ws/http} signs with a throwaway key that changes on"
+bashio::log.info "every page load, so it is always rejected. Use Buzz Desktop, not the browser."
+
 bashio::log.info "Bootstrap complete"
 idle

@@ -57,6 +57,22 @@ esac
 
 ORIGIN="${HTTP_SCHEME}://${AUTHORITY}"
 
+# An mDNS name is a trap here. Buzz Desktop resolves it with a Rust HTTP client
+# that takes the first address returned and does not fall back, and mDNS
+# commonly answers with a link-local IPv6 address first. This add-on publishes
+# its port through Docker, which is IPv4-only, so Desktop fails with
+# "join policy request failed: error sending request" while a browser still
+# works (browsers retry over IPv4).
+case "${HOST_AUTHORITY%%:*}" in
+    *.local)
+        bashio::log.warning "relay_url uses the mDNS name '${HOST_AUTHORITY%%:*}'."
+        bashio::log.warning "Buzz Desktop may fail to connect with 'error sending request', because"
+        bashio::log.warning ".local often resolves to IPv6 first and this add-on is reachable over"
+        bashio::log.warning "IPv4 only. If that happens, set relay_url to the IPv4 address instead"
+        bashio::log.warning "(e.g. ws://192.168.1.50:3000) and reserve that address in your router."
+        ;;
+esac
+
 # Warn loudly when relay_url changes: the relay will create a SECOND community
 # for the new host and the existing one becomes unreachable. Warn rather than
 # refuse, so a typo can still be corrected before the relay is used for real.

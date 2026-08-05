@@ -18,6 +18,13 @@ own web bundle, which is a **git repository browser** plus the `/invite/<code>`
 landing page others use to join — it is not a chat UI. That is upstream's
 design, not a limitation of this add-on.
 
+Note that the web bundle **cannot authenticate on a closed relay**. Without a
+NIP-07 browser extension it signs with a throwaway key that is regenerated on
+every page load, so each visit is rejected with `not a relay member` in the log
+and the page shows "This community is empty". That is expected. Install a NIP-07
+extension and import the same key if you want the browser to work; otherwise
+just use Desktop and ignore those log lines.
+
 ## Before you start
 
 1. Install Buzz Desktop and let it create your identity.
@@ -59,10 +66,34 @@ Two consequences:
   invisible. The add-on logs a loud warning when it detects a change; setting the
   option back restores the original workspace.
 
+**Prefer the IPv4 address over `homeassistant.local`.** Buzz Desktop resolves
+the URL with a Rust HTTP client that takes the first address DNS returns and
+does not fall back. `.local` names are answered by mDNS, which commonly returns
+an IPv6 address first — and this add-on publishes its port through Docker, which
+is IPv4-only. The result is that a browser can open the page fine (browsers
+retry over IPv4) while Desktop fails with:
+
+```
+join policy request failed: error sending request for url
+(http://homeassistant.local:3000/api/join-policy)
+```
+
+So set `relay_url` to the IPv4 address of your Home Assistant host, for example
+`ws://192.168.1.50:3000`, and give that host a DHCP reservation in your router
+so the address never changes. The add-on logs a warning if you use a `.local`
+name. To check which way a name resolves:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{remote_ip}\n' http://homeassistant.local:3000/api/join-policy
+curl -sS -4 -o /dev/null -w '%{http_code} %{remote_ip}\n' http://homeassistant.local:3000/api/join-policy
+```
+
+If the first fails and the second returns `200`, you have hit exactly this.
+
 If you would rather not pin a port, you can change the host port mapping to `80`
-in the add-on's Network panel and set `relay_url` to `ws://homeassistant.local`
-— since `:80` is stripped, the key then works from any port-80 alias. Only do
-this if nothing else on the host uses port 80.
+in the add-on's Network panel and set `relay_url` accordingly — since `:80` is
+stripped, the key then works from any port-80 alias. Only do this if nothing
+else on the host uses port 80.
 
 ## First start
 
@@ -101,17 +132,37 @@ creates a new community, so do it before you have data worth keeping.
 
 ## Adding and removing members
 
-Add people to the `members` option; they are reconciled every start, after the
-relay is ready, and adding is idempotent. `owner` is not a valid role — the owner
-comes only from `owner_pubkey`.
+The usual way to add someone is an **invite**: from Desktop, as owner or admin,
+mint an invite link. Claiming it adds that person to the relay automatically with
+role `member` — no add-on configuration needed. Claiming an invite in a browser
+requires a NIP-07 extension. Invite links (`/invite/<code>`) are served even when
+`serve_web_gui` is off.
+
+For keys you already know, the `members` option is the declarative alternative:
+entries are reconciled on every start, after the relay is ready, and adding is
+idempotent. `owner` is not a valid role — the owner comes only from
+`owner_pubkey`.
+
+Every start also logs the current roster, so you can always see which pubkeys are
+allowed to connect:
+
+```
+Relay roster — only these pubkeys may connect:
+  owner  e42e957c42fb5e35935041b02fa3d689a4c24ac464588aa3195ecdf0334ba797
+  member 48345cda9b93a4f5926590ef20f69cd82ac2cfedb40ae56b3ade2c294a38cf16
+```
 
 Removing someone from the list does **not** remove them from the relay, because
-removal is destructive. Do it explicitly from the add-on's terminal:
+removal is destructive. Add-ons have no built-in shell, so do it from the SSH
+add-on (protection mode off), against the add-on's container:
 
 ```bash
-buzz-admin remove-member --pubkey <npub-or-hex>
-buzz-admin list-members
+docker exec addon_caf98a7f_buzz buzz-admin list-members
+docker exec addon_caf98a7f_buzz buzz-admin remove-member --pubkey <npub-or-hex>
 ```
+
+The container name is `addon_<repository-hash>_buzz`; find yours with
+`docker ps --format '{{.Names}}' | grep buzz`.
 
 ## Backups
 
@@ -174,6 +225,28 @@ run automatically on start.
   path prefix, both of which break the relay's host-keyed community lookup.
 
 ## Troubleshooting
+
+**Desktop: `join policy request failed: error sending request for url (…)`.**
+A connection-level failure, not an HTTP error — Desktop could not reach the relay
+at all. Almost always the mDNS/IPv6 trap described under `relay_url` above: use
+the IPv4 address instead of `homeassistant.local`.
+
+**Desktop: `relay returned 404 Not Found: relay: no community is configured for
+this host`.** The URL you typed in Desktop does not match the add-on's
+`relay_url`, and the relay refuses to guess — it has no fallback community. The
+relay creates the community for `relay_url` **at startup**, so change the option
+in the add-on's Configuration to exactly the URL clients will use, then
+**restart** the add-on. Confirm with the log lines
+`Configuration ready (relay_url=…, community host=…)` and
+`Deployment community ensured host=…`.
+
+**`not a relay member` / `relay_membership_required` in the log.** The relay
+prints the rejected pubkey and the add-on prints the roster at every start;
+compare the two. If the rejected pubkey is yours, put it in `owner_pubkey` or
+`members` and restart. **If it changes on every attempt, it is the browser** —
+the web UI signs with a throwaway key that is regenerated on each page load, so
+on a closed relay it is always rejected. That is upstream behaviour, harmless,
+and the reason to use Buzz Desktop rather than the browser.
 
 **Add-on stops right after start.** Almost always a rejected `owner_pubkey` with
 `require_relay_membership: true`. The log names the offending option.
