@@ -1,0 +1,44 @@
+{
+  "name": "Buzz",
+  "version": "0.1.0",
+  "slug": "buzz",
+  "description": "Self-hosted Buzz relay for humans and AI agents, with bundled PostgreSQL, Redis and MinIO (https://buzz.xyz)",
+  "url": "https://github.com/block/buzz",
+  "arch": ["aarch64", "amd64"],
+  "init": false,
+  "startup": "application",
+  "boot": "auto",
+  "backup": "cold",
+  "panel_icon": "mdi:forum",
+  "panel_title": "Buzz",
+  "webui": "http://[HOST]:[PORT:3000]/",
+  "ports": {
+    "3000/tcp": 3000
+  },
+  "ports_description": {
+    "3000/tcp": "Buzz relay: WebSocket + REST API. Buzz Desktop and buzz-cli connect here. Must match the port in relay_url."
+  },
+  "options": {
+    "relay_url": "ws://homeassistant.local:3000",
+    "owner_pubkey": "",
+    "members": [],
+    "require_relay_membership": true,
+    "serve_web_gui": true,
+    "extra_cors_origins": "",
+    "log_level": "info"
+  },
+  "schema": {
+    "relay_url": "match(^wss?://[A-Za-z0-9._:\\[\\]-]+$)",
+    "owner_pubkey": "match(^(npub1[023456789acdefghjklmnpqrstuvwxyz]{58}|[0-9a-fA-F]{64})$)",
+    "members": [
+      {
+        "pubkey": "str",
+        "role": "list(member|admin)?"
+      }
+    ],
+    "require_relay_membership": "bool?",
+    "serve_web_gui": "bool?",
+    "extra_cors_origins": "str?",
+    "log_level": "list(trace|debug|info|warn|error)?"
+  }
+}

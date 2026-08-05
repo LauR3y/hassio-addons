@@ -1,0 +1,81 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Post-start reconciliation: waits until the relay is ready, records that the
+# MinIO conformance probe passed, and adds the configured members to the roster.
+#
+# This runs as a supervised longrun because legacy services.d has no oneshot
+# type, so two rules apply:
+#   1. There is deliberately NO finish script -- a halt stub would stop the whole
+#      add-on the moment reconciliation completed.
+#   2. It must never exit, or s6 would restart it in a loop. Every path ends in
+#      `exec sleep infinity`, and every failure becomes a warning. `set -e` is
+#      intentionally not used.
+# ==============================================================================
+
+# shellcheck source=/dev/null
+source /usr/lib/buzz/common.sh
+buzz::load_env
+
+idle() {
+    exec sleep infinity
+}
+
+if ! buzz::wait_relay_ready 900; then
+    bashio::log.warning "The relay did not report ready within 15 minutes, so member \
+reconciliation was skipped. Restart the add-on once the relay is healthy, or add members \
+by hand from the add-on terminal: buzz-admin add-member --pubkey <npub-or-hex> --role member"
+    idle
+fi
+bashio::log.info "Relay is ready; the community for ${RELAY_URL} exists."
+
+# The conformance probe runs before the listener binds, so readiness means it
+# passed for this MinIO release. Later boots skip it.
+printf '%s' "${BUZZ_MINIO_RELEASE}" > /data/.probe-passed 2>/dev/null || \
+    bashio::log.warning "Could not write /data/.probe-passed; the conformance probe will run again next boot."
+
+COUNT="$(jq -r '(.members // []) | length' "${BUZZ_OPTIONS_FILE}" 2>/dev/null || echo 0)"
+if [ "${COUNT}" -gt 0 ] 2>/dev/null; then
+    bashio::log.info "Reconciling ${COUNT} configured member(s)"
+
+    for ((i = 0; i < COUNT; i++)); do
+        # Accept both the structured form ({"pubkey": ..., "role": ...}) and a
+        # plain "pubkey" or "pubkey:role" string, so the add-on keeps working if
+        # the options schema is ever flattened.
+        ENTRY_TYPE="$(jq -r --argjson i "${i}" '.members[$i] | type' "${BUZZ_OPTIONS_FILE}")"
+        if [ "${ENTRY_TYPE}" = "object" ]; then
+            PUBKEY="$(jq -r --argjson i "${i}" '.members[$i].pubkey // empty' "${BUZZ_OPTIONS_FILE}")"
+            ROLE="$(jq -r --argjson i "${i}" '.members[$i].role // "member"' "${BUZZ_OPTIONS_FILE}")"
+        else
+            ENTRY="$(jq -r --argjson i "${i}" '.members[$i] // empty' "${BUZZ_OPTIONS_FILE}")"
+            PUBKEY="${ENTRY%%:*}"
+            ROLE="${ENTRY#*:}"
+            [ "${ROLE}" = "${ENTRY}" ] && ROLE="member"
+        fi
+
+        if [ -z "${PUBKEY}" ]; then
+            bashio::log.warning "members[${i}] has no pubkey; skipping."
+            continue
+        fi
+
+        # add-member is idempotent (it reports "already a member ... (no change)"
+        # and exits 0), so there is no need to read the current roster first.
+        if s6-setuidgid buzz /usr/local/bin/buzz-admin add-member \
+                --pubkey "${PUBKEY}" --role "${ROLE}"; then
+            bashio::log.info "Member ready: ${PUBKEY} (${ROLE})"
+        else
+            bashio::log.warning "Could not add ${PUBKEY} as ${ROLE}; see the error above. Continuing."
+        fi
+
+        # Each add publishes a kind:13534 roster event stamped to the second, so
+        # two adds within the same second collide. Serial, one per second, never
+        # parallel.
+        sleep 1
+    done
+fi
+
+# Members removed from the options list are left on the relay on purpose:
+# removal is destructive, and the owner can never be removed. Remove one with
+#   buzz-admin remove-member --pubkey <npub-or-hex>
+bashio::log.info "Bootstrap complete"
+idle

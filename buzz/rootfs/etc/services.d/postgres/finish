@@ -1,0 +1,7 @@
+#!/usr/bin/execlineb -S0
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Take down the S6 supervision tree when PostgreSQL stops -- the relay cannot
+# work without it, so fail the whole add-on rather than half-run.
+# ==============================================================================
+/run/s6/basedir/bin/halt

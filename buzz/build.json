@@ -1,0 +1,12 @@
+{
+  "build_from": {
+    "aarch64": "ghcr.io/home-assistant/aarch64-base-debian:trixie",
+    "amd64": "ghcr.io/home-assistant/amd64-base-debian:trixie"
+  },
+  "args": {
+    "BUILD_ARCH": "{arch}",
+    "BUILD_DATE": "{date}",
+    "BUILD_REF": "{ref}",
+    "BUILD_VERSION": "{version}"
+  }
+}

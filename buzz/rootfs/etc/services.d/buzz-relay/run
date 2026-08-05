@@ -1,0 +1,47 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Runs the Buzz relay. Legacy s6 services.d has no dependency ordering, so this
+# script owns the whole graph: it waits for PostgreSQL, Redis and MinIO to be
+# ready, makes sure the media bucket exists, and only then execs the relay.
+# ==============================================================================
+set -e
+
+# shellcheck source=/dev/null
+source /usr/lib/buzz/common.sh
+buzz::load_env
+
+bashio::log.info "Waiting for PostgreSQL, Redis and MinIO"
+buzz::wait_postgres
+buzz::wait_redis
+buzz::wait_minio
+
+# The relay never creates its own bucket (there is no CreateBucket call in
+# block/buzz); upstream's compose stack uses a separate `mc mb` init container.
+# Both mc commands are idempotent.
+export MC_CONFIG_DIR="${BUZZ_RUN_DIR}/mc"
+MC_HOST_buzzlocal="http://$(cat "${BUZZ_SECRETS_DIR}/minio_access_key"):$(cat "${BUZZ_SECRETS_DIR}/minio_secret_key")@127.0.0.1:9000"
+export MC_HOST_buzzlocal
+if ! mc --quiet mb --ignore-existing "buzzlocal/${BUZZ_S3_BUCKET}"; then
+    bashio::exit.nok "Could not create or verify the MinIO bucket '${BUZZ_S3_BUCKET}'. \
+Check the 'minio' lines in the log above."
+fi
+mc --quiet anonymous set none "buzzlocal/${BUZZ_S3_BUCKET}" || true
+unset MC_HOST_buzzlocal
+
+# The git conformance probe races 32 writers x 3 rounds of conditional writes
+# against MinIO on every start and is fatal on failure -- far too heavy for an
+# SD card. Run a reduced version once per bundled MinIO release, then skip it
+# while the marker (written by buzz-bootstrap once the relay is ready) matches.
+if [ "$(cat /data/.probe-passed 2>/dev/null || true)" = "${BUZZ_MINIO_RELEASE}" ]; then
+    export BUZZ_GIT_CONFORMANCE_PROBE=false
+else
+    export BUZZ_GIT_CONFORMANCE_PROBE=true
+    export BUZZ_GIT_PROBE_WRITERS=4
+    export BUZZ_GIT_PROBE_ROUNDS=1
+    bashio::log.info "Running the MinIO conditional-write conformance probe (once per MinIO release)"
+fi
+
+bashio::log.info "Starting buzz-relay on ${BUZZ_BIND_ADDR} (relay_url=${RELAY_URL})"
+cd /data/buzz
+exec s6-setuidgid buzz /usr/local/bin/buzz-relay

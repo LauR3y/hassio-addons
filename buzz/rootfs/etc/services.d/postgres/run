@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Runs PostgreSQL 17. Never as root -- postgres refuses to start as uid 0.
+# ==============================================================================
+set -e
+
+bashio::log.info "Starting PostgreSQL 17 (data: /data/postgres)"
+exec s6-setuidgid postgres /usr/lib/postgresql/17/bin/postgres -D /data/postgres

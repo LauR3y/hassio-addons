@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Runs Redis (pub/sub and presence for the relay).
+# ==============================================================================
+set -e
+
+bashio::log.info "Starting Redis on 127.0.0.1:6379"
+exec s6-setuidgid redis /usr/bin/redis-server /var/run/buzz/redis.conf

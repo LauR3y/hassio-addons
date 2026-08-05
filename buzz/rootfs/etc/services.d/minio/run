@@ -1,0 +1,26 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Runs MinIO, the S3-compatible object store the relay uses for media uploads
+# and git object storage.
+# ==============================================================================
+set -e
+
+# shellcheck source=/dev/null
+source /usr/lib/buzz/common.sh
+
+# MinIO's own docker-entrypoint handles the *_FILE variants; we do not ship it,
+# so read the credentials here and export them directly.
+MINIO_ROOT_USER="$(cat "${BUZZ_SECRETS_DIR}/minio_access_key")"
+MINIO_ROOT_PASSWORD="$(cat "${BUZZ_SECRETS_DIR}/minio_secret_key")"
+export MINIO_ROOT_USER MINIO_ROOT_PASSWORD
+
+# No web console (the relay is the only client) and no update checks.
+export MINIO_BROWSER=off
+export MINIO_UPDATE=off
+# Caps MinIO's internal byte pool and skips its root-disk check, which matters
+# because /data lives on the Home Assistant data disk.
+export MINIO_CI_CD=true
+
+bashio::log.info "Starting MinIO on 127.0.0.1:9000 (data: /data/minio)"
+exec s6-setuidgid minio /usr/local/bin/minio server /data/minio --address 127.0.0.1:9000 --quiet
