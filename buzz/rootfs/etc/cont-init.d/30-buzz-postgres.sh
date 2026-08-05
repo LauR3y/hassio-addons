@@ -21,6 +21,23 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
     bashio::log.info "First boot: initialising the PostgreSQL 17 cluster in ${PGDATA}"
     bashio::log.info "This takes a few minutes on an SD card. Do not restart the add-on."
 
+    # initdb refuses to run against a non-empty directory. No PG_VERSION and no
+    # base/ means there is no database here, only leftovers from an attempt that
+    # aborted part-way, so clearing them is safe and makes a retry possible.
+    if [ -n "$(ls -A "${PGDATA}" 2>/dev/null)" ] && [ ! -d "${PGDATA}/base" ]; then
+        bashio::log.warning "Clearing an incomplete PostgreSQL cluster in ${PGDATA} left by a failed initialisation."
+        find "${PGDATA}" -mindepth 1 -delete
+    fi
+
+    # initdb runs as postgres, which cannot read /data/.secrets (0700 root).
+    # Stage the password in a postgres-owned file for the duration of initdb
+    # only: the secrets directory stays root-only, and the value still never
+    # appears in argv. /var/run/buzz is container-local, so it is wiped on boot.
+    PW_STAGE="${BUZZ_RUN_DIR}/pg_init_pw"
+    trap 'rm -f "${PW_STAGE}"' EXIT
+    install -m 0600 -o postgres -g postgres /dev/null "${PW_STAGE}"
+    cat "${BUZZ_SECRETS_DIR}/postgres_password" > "${PW_STAGE}"
+
     # --pwfile: initdb reads the password from a file, so it never appears in
     #   argv or in SQL text.
     # -U buzz: the relay's role is the cluster superuser on purpose -- buzz
@@ -29,7 +46,7 @@ if [ ! -s "${PGDATA}/PG_VERSION" ]; then
     s6-setuidgid postgres "${PGBIN}/initdb" \
         -D "${PGDATA}" \
         -U buzz \
-        --pwfile="${BUZZ_SECRETS_DIR}/postgres_password" \
+        --pwfile="${PW_STAGE}" \
         --auth-local=trust \
         --auth-host=scram-sha-256 \
         --encoding=UTF8 \

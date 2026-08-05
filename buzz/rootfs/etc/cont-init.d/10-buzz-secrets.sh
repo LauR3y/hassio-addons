@@ -10,6 +10,11 @@ set -e
 # shellcheck source=/dev/null
 source /usr/lib/buzz/common.sh
 
+# Every service user (postgres, redis, minio, buzz) needs to traverse /data to
+# reach its own subdirectory. Each subdirectory below sets its own restrictive
+# mode and .secrets stays root-only, so this grants traversal and nothing more.
+chmod 0755 /data
+
 install -d -m 0700 "${BUZZ_SECRETS_DIR}"
 # The runtime directory must be traversable by the service users (redis reads
 # its config from here); the secrets it holds are protected per file, and the
