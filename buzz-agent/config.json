@@ -1,0 +1,40 @@
+{
+  "name": "Buzz Agent",
+  "version": "0.1.0",
+  "slug": "buzz_agent",
+  "description": "Runs a Buzz AI agent that stays online on Home Assistant, connected to your Buzz relay",
+  "url": "https://github.com/block/buzz",
+  "arch": ["aarch64", "amd64"],
+  "init": false,
+  "startup": "application",
+  "boot": "auto",
+  "backup": "cold",
+  "options": {
+    "relay_url": "",
+    "owner_pubkey": "",
+    "provider": "openrouter",
+    "api_key": "",
+    "model": "anthropic/claude-sonnet-4.5",
+    "api_base_url": "",
+    "respond_to": "owner-only",
+    "respond_to_allowlist": "",
+    "channels": "",
+    "subscribe": "mentions",
+    "system_prompt": "",
+    "log_level": "info"
+  },
+  "schema": {
+    "relay_url": "match(^wss?://[A-Za-z0-9._:\\[\\]-]+$)",
+    "owner_pubkey": "match(^(npub1[023456789acdefghjklmnpqrstuvwxyz]{58}|[0-9a-fA-F]{64})$)",
+    "provider": "list(openrouter|anthropic|openai|databricks)",
+    "api_key": "password",
+    "model": "str",
+    "api_base_url": "str?",
+    "respond_to": "list(owner-only|anyone|allowlist)?",
+    "respond_to_allowlist": "str?",
+    "channels": "str?",
+    "subscribe": "list(mentions|all)?",
+    "system_prompt": "str?",
+    "log_level": "list(trace|debug|info|warn|error)?"
+  }
+}

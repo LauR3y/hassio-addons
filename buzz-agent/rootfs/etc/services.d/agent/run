@@ -1,0 +1,31 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz Agent
+# Runs the buzz-acp harness, which spawns the bundled buzz-agent and bridges it
+# to the relay. Mirrors the upstream sprig entrypoint: configure the nostr git
+# credential helper for the relay, then exec the harness.
+# ==============================================================================
+set -e
+
+ENV_DIR=/var/run/buzz-agent/env
+
+# Values are read from files, so no secret ever appears in the process table.
+for file in "${ENV_DIR}"/*; do
+    [ -f "${file}" ] || continue
+    export "$(basename "${file}")=$(cat "${file}")"
+done
+
+# git pushes to the relay authenticate with the agent's nostr key.
+if [ -n "${BUZZ_RELAY_URL:-}" ]; then
+    RELAY_HTTP="${BUZZ_RELAY_URL/#ws:/http:}"
+    RELAY_HTTP="${RELAY_HTTP/#wss:/https:}"
+    RELAY_HTTP="${RELAY_HTTP%/}"
+    s6-setuidgid agent git config --global \
+        "credential.${RELAY_HTTP}/git.helper" /usr/local/bin/git-credential-nostr
+    s6-setuidgid agent git config --global \
+        "credential.${RELAY_HTTP}/git.useHttpPath" true
+fi
+
+bashio::log.info "Starting the Buzz agent harness"
+cd /data/workspace
+exec s6-setuidgid agent /usr/local/bin/buzz-acp
