@@ -215,6 +215,41 @@ docker exec addon_caf98a7f_buzz buzz-admin remove-member --pubkey <npub-or-hex>
 The container name is `addon_<repository-hash>_buzz`; find yours with
 `docker ps --format '{{.Names}}' | grep buzz`.
 
+## Adding a phone
+
+Two different things, for two different goals.
+
+**Invite (recommended).** From Desktop as owner or admin, create an invite and open
+the link on the phone. The phone joins with its **own** identity and the relay
+adds it as a `member` automatically, so the relay stays closed and you can
+revoke that one device later. Nothing to configure in the add-on.
+
+**Pairing** copies your *desktop identity* onto the phone, so both devices are
+the same Nostr key. It uses NIP-AB: a QR code, an end-to-end encrypted channel
+and a 6-digit verification code. This needs a separate pairing relay — the main
+relay does not serve one — so Desktop's *Settings → Mobile* fails with
+`WebSocket connection failed: HTTP error: 404 Not Found` until you set
+`pairing_relay_url`.
+
+To enable it, publish port `5000` in the add-on's Network panel and set:
+
+```yaml
+pairing_relay_url: ws://192.168.1.50:5000     # your HA host's LAN address
+```
+
+The add-on then runs the bundled `buzz-pair-relay` on that port and advertises
+the URL in its NIP-11 document, which is where Desktop looks. The URL must be
+reachable from **both** the desktop and the phone, which is why it is not
+derived automatically: over the LAN use the host's IP; for pairing from outside,
+give it its own tunnel hostname (e.g. `wss://pair.example.com` → port 5000) and
+use that instead.
+
+The pairing relay only ever sees ciphertext addressed to throwaway keys — the
+payload is encrypted between the two devices and confirmed with the on-screen
+code — so `wss://pairing.buzz.xyz` also works if you would rather not run one.
+That does route your (encrypted) key material through a third party, which is
+why this add-on does not use it by default.
+
 ## Backups
 
 This add-on is marked `backup: cold`, so Home Assistant stops it while making a

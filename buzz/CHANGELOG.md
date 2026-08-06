@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.5
+
+- Add the bundled NIP-AB device pairing relay, so Buzz Desktop's *Settings →
+  Mobile* QR pairing works. The main relay does not serve `/pair`, and without a
+  pairing relay advertised in NIP-11 Desktop fell back to that legacy path and
+  failed with `WebSocket connection failed: HTTP error: 404 Not Found`.
+  Opt in with the new `pairing_relay_url` option and publish port 5000; left
+  empty, nothing changes and pairing stays off.
+- Document invites as the simpler way to add a phone: the phone joins with its
+  own identity and is added as a member automatically, with no pairing relay and
+  no add-on configuration.
+
 ## 0.1.4
 
 - Remove the "Open Web UI" button. Home Assistant substitutes `[HOST]` with the

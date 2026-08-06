@@ -44,6 +44,9 @@ COPY --from=mc /usr/bin/mc /usr/local/bin/mc
 
 COPY --from=buzz /usr/local/bin/buzz-relay /usr/local/bin/buzz-relay
 COPY --from=buzz /usr/local/bin/buzz-admin /usr/local/bin/buzz-admin
+# Standalone NIP-AB device-pairing relay. The main relay does not serve /pair,
+# so without this, Buzz Desktop's mobile pairing fails with a 404.
+COPY --from=buzz /usr/local/bin/buzz-pair-relay /usr/local/bin/buzz-pair-relay
 COPY --from=buzz /srv/buzz/web /srv/buzz/web
 COPY --from=buzz /srv/buzz/admin-web /srv/buzz/admin-web
 

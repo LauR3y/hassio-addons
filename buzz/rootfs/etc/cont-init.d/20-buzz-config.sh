@@ -169,6 +169,23 @@ put_env BUZZ_GIT_MAX_CONCURRENT_OPS "4"
 put_env BUZZ_DB_POOL_SIZE "8"
 put_env BUZZ_REDIS_POOL_SIZE "4"
 
+# Device pairing (NIP-AB). The relay advertises this in its NIP-11 document and
+# Buzz Desktop uses it for the mobile pairing QR. With it unset, Desktop falls
+# back to a legacy /pair path that this relay does not serve, and pairing fails
+# with "WebSocket connection failed: HTTP error: 404 Not Found". The URL is not
+# derived automatically because it must be reachable from both the desktop and
+# the phone, which this add-on cannot know.
+PAIRING_RELAY_URL="$(buzz::opt pairing_relay_url)"
+if [ -n "${PAIRING_RELAY_URL}" ]; then
+    put_env BUZZ_PAIRING_RELAY_URL "${PAIRING_RELAY_URL}"
+    bashio::log.info "Device pairing relay advertised at ${PAIRING_RELAY_URL}"
+    bashio::log.info "Publish port 5000 (and route it if that URL is external) or pairing will not connect."
+else
+    bashio::log.info "Mobile device pairing is disabled (pairing_relay_url is empty)."
+    bashio::log.info "Invites are the simpler way to add a phone; set pairing_relay_url only if you"
+    bashio::log.info "want the same identity on both devices."
+fi
+
 put_env HOME "/data/buzz"
 put_env RUST_LOG \
     "buzz_relay=${LOG_LEVEL},buzz_db=${LOG_LEVEL},buzz_auth=${LOG_LEVEL},buzz_pubsub=${LOG_LEVEL},tower_http=${LOG_LEVEL}"

@@ -1,0 +1,27 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz
+# Standalone NIP-AB device-pairing relay, used by Buzz Desktop's mobile pairing
+# QR code. Only runs when pairing_relay_url is configured; the main relay does
+# not serve /pair, so without this Desktop's pairing fails with a 404.
+#
+# Deliberately has NO finish script: pairing is optional, so neither a crash nor
+# the disabled path should take the whole add-on down.
+# ==============================================================================
+
+# shellcheck source=/dev/null
+source /usr/lib/buzz/common.sh
+buzz::load_env
+
+if [ -z "${BUZZ_PAIRING_RELAY_URL:-}" ]; then
+    # Idle rather than exit, or s6 would restart this in a loop.
+    exec sleep infinity
+fi
+
+# Pairing traffic is end-to-end encrypted between the two devices (ECDH plus a
+# short authentication string), so this relay only ever sees ciphertext
+# addressed to throwaway keys.
+export BUZZ_PAIR_RELAY_BIND_ADDR="0.0.0.0:5000"
+
+bashio::log.info "Starting the device pairing relay on ${BUZZ_PAIR_RELAY_BIND_ADDR}"
+exec s6-setuidgid buzz /usr/local/bin/buzz-pair-relay
