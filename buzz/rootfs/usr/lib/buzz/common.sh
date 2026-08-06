@@ -10,10 +10,26 @@ BUZZ_ENV_DIR="${BUZZ_RUN_DIR}/env"
 BUZZ_SECRETS_DIR=/data/.secrets
 BUZZ_OPTIONS_FILE=/data/options.json
 
-# Read an add-on option. jq -r prints the literal string "null" for a missing
-# key, so `// empty` maps that to an empty string instead.
+# Read a string option. jq -r prints the literal string "null" for a missing
+# key, so `// empty` maps that to an empty string instead. Only safe for
+# strings: see buzz::opt_bool for why booleans need their own reader.
 buzz::opt() {
     jq -r --arg k "$1" '.[$k] // empty' "${BUZZ_OPTIONS_FILE}"
+}
+
+# Read a boolean option. Deliberately does NOT use jq's `//` operator, which
+# treats `false` as absent exactly like `null` -- with `//` a user setting an
+# option to false would silently get the default instead.
+# $1 = key, $2 = default ("true" or "false").
+buzz::opt_bool() {
+    local value
+    value="$(jq -r --arg k "$1" \
+        'if has($k) and .[$k] != null then (.[$k] | tostring) else "" end' \
+        "${BUZZ_OPTIONS_FILE}")"
+    case "${value}" in
+        true | false) printf '%s' "${value}" ;;
+        *) printf '%s' "$2" ;;
+    esac
 }
 
 # Hex-only secrets: these values get interpolated into DATABASE_URL, REDIS_URL

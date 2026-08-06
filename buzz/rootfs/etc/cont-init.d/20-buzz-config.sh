@@ -105,11 +105,8 @@ bashio::log.info "Relay owner pubkey (hex): ${OWNER_HEX}"
 bashio::log.info "Verify that matches Settings -> Identity -> Public key in Buzz Desktop."
 
 # --- Remaining options --------------------------------------------------------
-REQUIRE_MEMBERSHIP="$(buzz::opt require_relay_membership)"
-[ -n "${REQUIRE_MEMBERSHIP}" ] || REQUIRE_MEMBERSHIP="true"
-
-SERVE_WEB_GUI="$(buzz::opt serve_web_gui)"
-[ -n "${SERVE_WEB_GUI}" ] || SERVE_WEB_GUI="true"
+REQUIRE_MEMBERSHIP="$(buzz::opt_bool require_relay_membership true)"
+SERVE_WEB_GUI="$(buzz::opt_bool serve_web_gui true)"
 
 LOG_LEVEL="$(buzz::opt log_level)"
 [ -n "${LOG_LEVEL}" ] || LOG_LEVEL="info"
@@ -177,3 +174,10 @@ put_env RUST_LOG \
     "buzz_relay=${LOG_LEVEL},buzz_db=${LOG_LEVEL},buzz_auth=${LOG_LEVEL},buzz_pubsub=${LOG_LEVEL},tower_http=${LOG_LEVEL}"
 
 bashio::log.info "Configuration ready (relay_url=${RELAY_URL}, community host=${HOST_AUTHORITY})"
+# This decides who may connect at all, so make it visible rather than implicit.
+if bashio::var.true "${REQUIRE_MEMBERSHIP}"; then
+    bashio::log.info "Closed relay: only the owner and listed members may connect."
+else
+    bashio::log.warning "OPEN RELAY: membership is not enforced, so any client that can reach"
+    bashio::log.warning "this port may read and post. Set require_relay_membership to true to close it."
+fi
