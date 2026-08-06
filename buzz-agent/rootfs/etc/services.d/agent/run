@@ -26,6 +26,25 @@ if [ -n "${BUZZ_RELAY_URL:-}" ]; then
         "credential.${RELAY_HTTP}/git.useHttpPath" true
 fi
 
+# Publish the agent's profile so it appears under a name rather than a bare
+# npub, and shows up in mention autocomplete. kind:0 is replaceable, so this is
+# idempotent. It fails until the agent is a relay member, which is expected on
+# a first run -- warn and carry on rather than blocking the harness.
+if [ -n "${BUZZ_AGENT_DISPLAY_NAME:-}" ] && [ -n "${RELAY_HTTP:-}" ]; then
+    set -- --name "${BUZZ_AGENT_DISPLAY_NAME}"
+    [ -n "${BUZZ_AGENT_ABOUT:-}" ] && set -- "$@" --about "${BUZZ_AGENT_ABOUT}"
+    [ -n "${BUZZ_AGENT_AVATAR:-}" ] && set -- "$@" --avatar "${BUZZ_AGENT_AVATAR}"
+    if BUZZ_RELAY_URL="${RELAY_HTTP}" s6-setuidgid agent \
+            /usr/local/bin/buzz users set-profile "$@" > /dev/null 2>&1; then
+        bashio::log.info "Published the agent profile as '${BUZZ_AGENT_DISPLAY_NAME}'"
+    else
+        bashio::log.warning "Could not publish the agent profile — this is normal until the"
+        bashio::log.warning "agent's pubkey is added to the relay's members. It will retry on restart."
+    fi
+fi
+
 bashio::log.info "Starting the Buzz agent harness"
+bashio::log.info "The agent only acts in channels it has been added to; add it to a channel"
+bashio::log.info "in Buzz, or the log will say 'discovered 0 channel(s)'."
 cd /data/workspace
 exec s6-setuidgid agent /usr/local/bin/buzz-acp

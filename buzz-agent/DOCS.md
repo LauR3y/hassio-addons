@@ -70,6 +70,36 @@ Giving the agent its **own** key rather than sharing yours is deliberate: it can
 be revoked on its own by removing that one entry, and its messages are
 attributable to it.
 
+## Where the agent appears — and why it might look invisible
+
+Being a relay member is not enough to see it. Two separate things matter:
+
+**A name.** `buzz-acp` never publishes a profile of its own, so without help the
+agent shows up as a bare npub. This add-on publishes one at every start from the
+`display_name`, `about` and `avatar_url` options (a replaceable kind:0 event, so
+re-publishing is harmless). The log confirms it:
+
+```
+Published the agent profile as 'HA Agent'
+```
+
+On the very first start this fails — the agent is not a relay member yet — and
+you get a warning instead. It succeeds on the restart after you add it to
+`members`.
+
+**Channel membership.** The agent only acts in channels it has been *added to*.
+`discover_channels` looks for NIP-29 kind:39002 member events containing the
+agent's pubkey, so until you add it to a channel in Buzz, the log says:
+
+```
+discovered 0 channel(s)
+no channel subscriptions resolved — agent will sit idle
+```
+
+That is the single most likely reason a correctly configured agent appears to do
+nothing. Add it to a channel from Desktop, then restart this add-on so it
+re-runs discovery.
+
 ## Talking to it
 
 Mention the agent in a channel from Desktop or mobile. With the defaults

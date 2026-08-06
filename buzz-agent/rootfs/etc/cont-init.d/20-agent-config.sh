@@ -120,6 +120,19 @@ put_env RUST_LOG "buzz_acp=${LOG_LEVEL},buzz_agent=${LOG_LEVEL}"
 
 put_env HOME "/data/agent"
 
+# Profile fields. buzz-acp never publishes a kind:0 profile of its own, so
+# without this the agent shows up in Buzz as a bare npub. The service script
+# publishes these with `buzz users set-profile` once it can reach the relay.
+DISPLAY_NAME="$(opt display_name)"
+[ -n "${DISPLAY_NAME}" ] && put_env BUZZ_AGENT_DISPLAY_NAME "${DISPLAY_NAME}"
+# Also forwarded to the bundled git tooling, which uses it as the commit author
+# name instead of the raw npub.
+[ -n "${DISPLAY_NAME}" ] && put_env BUZZ_ACP_DISPLAY_NAME "${DISPLAY_NAME}"
+ABOUT="$(opt about)"
+[ -n "${ABOUT}" ] && put_env BUZZ_AGENT_ABOUT "${ABOUT}"
+AVATAR_URL="$(opt avatar_url)"
+[ -n "${AVATAR_URL}" ] && put_env BUZZ_AGENT_AVATAR "${AVATAR_URL}"
+
 bashio::log.info "Agent configured: provider=${PROVIDER} model=${MODEL:-<provider default>} \
 respond_to=${RESPOND_TO} subscribe=${SUBSCRIBE}"
 bashio::log.info "Relay: ${RELAY_URL}"
