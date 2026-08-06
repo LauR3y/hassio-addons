@@ -25,6 +25,16 @@ and the page shows "This community is empty". That is expected. Install a NIP-07
 extension and import the same key if you want the browser to work; otherwise
 just use Desktop and ignore those log lines.
 
+Even once it authenticates, that page lists **git repositories** and nothing
+else. It subscribes to `{"kinds":[30617]}` (repository announcements); an
+immediate `EOSE` with no events — and therefore "This community is empty" — is
+the correct rendering until you push a repository from Desktop.
+
+**There is deliberately no "Open Web UI" button.** Home Assistant substitutes
+`[HOST]` in that link with whatever host you are browsing HA on, which is not
+necessarily the `relay_url` host — behind a reverse proxy or tunnel it is
+guaranteed to be wrong. The add-on logs the correct URL at every start instead.
+
 ## Before you start
 
 1. Install Buzz Desktop and let it create your identity.
@@ -126,9 +136,50 @@ In Buzz Desktop choose **Join a Community** and enter your `relay_url`
 `BUZZ_RELAY_URL`.
 
 This is plain, unencrypted `ws://` on your local network. **Do not port-forward
-port 3000 to the internet.** If you need remote access, terminate TLS in a
-reverse proxy, then set `relay_url` to the `wss://…` URL — remember that this
-creates a new community, so do it before you have data worth keeping.
+port 3000 to the internet.** If you need remote access, put it behind something
+that terminates TLS — see the next section.
+
+## Remote access with a Cloudflare tunnel
+
+Give Buzz its **own** hostname; do not try to reuse the Home Assistant one, as
+the tunnel only serves 443 for that name and the relay is on 3000.
+
+Do these in order — the second step publishes the relay to the internet, so the
+relay must be closed before it happens.
+
+1. **Close the relay.** Set `require_relay_membership: true`, restart, and check
+   the log says `Closed relay: only the owner and listed members may connect.`
+   An open relay on a public hostname lets anyone on the internet join, read and
+   post.
+2. **Add the hostname to the tunnel.** With the Cloudflared add-on:
+
+   ```yaml
+   additional_hosts:
+     - hostname: buzz.example.com
+       service: http://<home-assistant-ip>:3000
+   ```
+
+   Or add the equivalent Public Hostname in the Cloudflare Zero Trust dashboard.
+   Keep the add-on's `3000/tcp` port published — that is what cloudflared
+   connects to. Do **not** put Cloudflare Access in front: Buzz Desktop's
+   WebSocket client cannot complete an Access login, and NIP-42 membership is
+   already the access control.
+3. **Point the add-on at it:** `relay_url: wss://buzz.example.com` (no port, no
+   trailing slash), then restart. `BUZZ_MEDIA_BASE_URL` and the CORS origin are
+   derived for you. Re-join from Desktop with that exact URL.
+
+Because `normalize_host` strips `:443`, the community key is just
+`buzz.example.com` with no port to keep in sync — one fewer thing to get wrong
+than a `host:3000` key.
+
+Remember this **re-keys the community** (see the `relay_url` warning above), so
+do it before you have data worth keeping.
+
+Two Cloudflare limits worth knowing: free-plan request bodies are capped at
+100 MB, which sits above this add-on's git pack limit (64 MB) and image limit
+(50 MB), so pushes and uploads fit; and Cloudflare drops idle WebSocket
+connections, so occasional Desktop reconnects are normal rather than a relay
+fault.
 
 ## Adding and removing members
 
