@@ -108,6 +108,12 @@ SUBSCRIBE="$(opt subscribe)"
 [ -n "${SUBSCRIBE}" ] || SUBSCRIBE="mentions"
 put_env BUZZ_ACP_SUBSCRIBE "${SUBSCRIBE}"
 
+# Channels to *join*. Different from BUZZ_ACP_CHANNELS below, which only filters
+# what an already-joined agent listens to: an agent that is not a member of any
+# channel discovers nothing and sits idle.
+JOIN_CHANNELS="$(opt join_channels)"
+[ -n "${JOIN_CHANNELS}" ] && put_env BUZZ_AGENT_JOIN_CHANNELS "${JOIN_CHANNELS}"
+
 CHANNELS="$(opt channels)"
 [ -n "${CHANNELS}" ] && put_env BUZZ_ACP_CHANNELS "${CHANNELS}"
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Add `join_channels`: the agent joins the listed channels (by name or UUID) at
+  every start. Without channel membership the harness discovers nothing and sits
+  idle, which was the last manual step in getting an agent working.
+
 ## 0.1.1
 
 - Publish the agent's profile (`display_name`, `about`, `avatar_url`) at start,

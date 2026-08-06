@@ -43,8 +43,49 @@ if [ -n "${BUZZ_AGENT_DISPLAY_NAME:-}" ] && [ -n "${RELAY_HTTP:-}" ]; then
     fi
 fi
 
+# Join the configured channels. The harness only discovers channels the agent is
+# already a member of, so without this an agent sits idle no matter how it is
+# configured. Joining is idempotent, and accepts either a channel UUID or a name
+# that is resolved through the relay's channel search.
+if [ -n "${BUZZ_AGENT_JOIN_CHANNELS:-}" ] && [ -n "${RELAY_HTTP:-}" ]; then
+    OLD_IFS="${IFS}"; IFS=','
+    for entry in ${BUZZ_AGENT_JOIN_CHANNELS}; do
+        IFS="${OLD_IFS}"
+        entry="$(echo "${entry}" | tr -d '[:space:]')"
+        [ -n "${entry}" ] || continue
+
+        case "${entry}" in
+            [0-9a-fA-F]*-[0-9a-fA-F]*-[0-9a-fA-F]*-[0-9a-fA-F]*-[0-9a-fA-F]*)
+                uuid="${entry}"
+                ;;
+            *)
+                uuid="$(BUZZ_RELAY_URL="${RELAY_HTTP}" s6-setuidgid agent \
+                    /usr/local/bin/buzz channels search --query "${entry}" --exact 2>/dev/null \
+                    | jq -r '[.. | objects | select(has("channel_id")) | .channel_id] | first // empty')"
+                if [ -z "${uuid}" ]; then
+                    bashio::log.warning "No channel named '${entry}' is visible to the agent; skipping."
+                    IFS=','
+                    continue
+                fi
+                ;;
+        esac
+
+        if BUZZ_RELAY_URL="${RELAY_HTTP}" s6-setuidgid agent \
+                /usr/local/bin/buzz channels join --channel "${uuid}" > /dev/null 2>&1; then
+            bashio::log.info "Joined channel ${entry} (${uuid})"
+        else
+            bashio::log.warning "Could not join channel ${entry} (${uuid}); it may be private or already joined."
+        fi
+        IFS=','
+    done
+    IFS="${OLD_IFS}"
+fi
+
 bashio::log.info "Starting the Buzz agent harness"
-bashio::log.info "The agent only acts in channels it has been added to; add it to a channel"
-bashio::log.info "in Buzz, or the log will say 'discovered 0 channel(s)'."
+if [ -z "${BUZZ_AGENT_JOIN_CHANNELS:-}" ]; then
+    bashio::log.info "No join_channels configured. The agent only acts in channels it belongs to,"
+    bashio::log.info "so set join_channels or add it to a channel in Buzz, otherwise the log below"
+    bashio::log.info "will say 'discovered 0 channel(s)' and nothing will happen."
+fi
 cd /data/workspace
 exec s6-setuidgid agent /usr/local/bin/buzz-acp

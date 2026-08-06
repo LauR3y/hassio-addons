@@ -87,18 +87,32 @@ On the very first start this fails — the agent is not a relay member yet — a
 you get a warning instead. It succeeds on the restart after you add it to
 `members`.
 
-**Channel membership.** The agent only acts in channels it has been *added to*.
+**Channel membership.** The agent only acts in channels it belongs to.
 `discover_channels` looks for NIP-29 kind:39002 member events containing the
-agent's pubkey, so until you add it to a channel in Buzz, the log says:
+agent's pubkey, so an agent in no channel logs this and does nothing:
 
 ```
 discovered 0 channel(s)
 no channel subscriptions resolved — agent will sit idle
 ```
 
-That is the single most likely reason a correctly configured agent appears to do
-nothing. Add it to a channel from Desktop, then restart this add-on so it
-re-runs discovery.
+That is the single most likely reason a correctly configured agent appears
+broken. Set `join_channels` and it joins them itself at every start:
+
+```yaml
+join_channels: general, dev
+```
+
+Entries are channel names (resolved through the relay's channel search) or
+channel UUIDs, comma-separated. Joining is idempotent, and the agent then shows
+up in that channel's member list. A name that does not resolve — a private
+channel it cannot see, or a typo — is logged as a warning and skipped.
+
+Adding it from Buzz Desktop instead works just as well; restart the add-on
+afterwards so discovery re-runs.
+
+Note `join_channels` (membership) is not the same as `channels` (a filter that
+narrows which of its channels an already-joined agent listens to).
 
 ## Talking to it
 

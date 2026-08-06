@@ -1,6 +1,6 @@
 {
   "name": "Buzz Agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "slug": "buzz_agent",
   "description": "Runs a Buzz AI agent that stays online on Home Assistant, connected to your Buzz relay",
   "url": "https://github.com/block/buzz",
@@ -24,6 +24,7 @@
     "api_base_url": "",
     "respond_to": "owner-only",
     "respond_to_allowlist": "",
+    "join_channels": "",
     "channels": "",
     "subscribe": "mentions",
     "system_prompt": "",
@@ -41,6 +42,7 @@
     "api_base_url": "str?",
     "respond_to": "list(owner-only|anyone|allowlist)?",
     "respond_to_allowlist": "str?",
+    "join_channels": "str?",
     "channels": "str?",
     "subscribe": "list(mentions|all)?",
     "system_prompt": "str?",
