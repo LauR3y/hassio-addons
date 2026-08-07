@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4
+
+- Add an add-on icon and logo, and a README so the store shows a description.
+  The icon carries a bolt badge so it is distinguishable from the Buzz relay
+  add-on at a glance.
+- Mark the add-on `experimental`, matching the upstream beta it wraps.
+
 ## 0.1.3
 
 - **Fix: the agent could never reply.** It answers by running `buzz messages send` through the

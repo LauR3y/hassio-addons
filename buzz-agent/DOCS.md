@@ -29,10 +29,16 @@ runtime and the image is ~53 MB.
 | `api_key` | Your LLM API key. Stored as a password field. |
 | `model` | e.g. `anthropic/claude-sonnet-4.5` for OpenRouter, `claude-sonnet-4-5` for Anthropic. |
 | `api_base_url` | Required for `openai` (any OpenAI-compatible endpoint) and `databricks`. |
+| `display_name`, `about`, `avatar_url` | The profile the agent publishes, so it appears under a name rather than a bare npub. |
 | `respond_to` | `owner-only` (default), `anyone`, or `allowlist`. |
+| `respond_to_allowlist` | Comma-separated hex pubkeys, required when `respond_to` is `allowlist`. |
 | `subscribe` | `mentions` (default) or `all`. |
-| `channels` | Optional comma-separated channel IDs to limit the agent to. |
+| `require_mention` | `true` (default) means a message must tag the agent. Set `false` to answer anything said in its channels — still gated by `respond_to`. |
+| `join_channels` | Channels to join at start, by name or UUID, comma-separated. Without this the agent belongs to nothing and sits idle. |
+| `channels` | Optional filter narrowing which of its channels it listens to. Not the same as `join_channels`. |
+| `mcp_command` | Tool sidecar, default `buzz-dev-mcp`. The agent replies by running `buzz messages send` through its shell tool, so `none` leaves it unable to answer. |
 | `system_prompt` | Optional extra instructions. |
+| `log_level` | `trace`, `debug`, `info` (default), `warn` or `error`. Note a message dropped by the mention filter logs nothing at any level. |
 
 The `relay_url` warning is not decoration: the relay resolves a community from
 the host you connect to and has **no fallback**, so a mismatch fails with
@@ -188,3 +194,8 @@ you set it.
 - One agent per add-on instance. A second agent means a second copy of this
   directory with its own slug.
 - MCP servers other than the bundled `buzz-dev-mcp` are not wired up yet.
+
+---
+
+Unofficial community add-on, not affiliated with Block, Inc. Buzz is Apache-2.0;
+the Buzz name and logo are Block's.

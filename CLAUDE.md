@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Home Assistant Add-ons repository containing custom add-ons packaged as Docker containers. Each subdirectory (e.g., `sbfspot/`, `surveillancestream/`) is an independent add-on.
 
+Current add-ons: `buzz` (Buzz relay + bundled PostgreSQL/Redis/MinIO), `buzz-agent` (a Buzz AI agent), `wealthfolio`, `aider`, `sbfspot`, `surveillancestream`. There is no CI — the Supervisor builds every add-on locally on the device, so no `image:` key is used anywhere.
+
 ## Build Commands
 
 ### Building Add-ons Locally
@@ -55,6 +57,17 @@ Web UI for surveillance streams:
 2. Container starts and reads options via `bashio` utilities
 3. Init scripts generate config files from templates
 4. Services start with generated configuration
+
+## Conventions learned the hard way
+
+These are not visible in the code and each one cost real debugging time:
+
+- **Match the base image to the upstream binary's libc.** `ghcr.io/hassio-addons/base` is Alpine/musl. A glibc binary copied from a Debian-based upstream image will not run on it — use `ghcr.io/home-assistant/{arch}-base-debian` instead (`buzz` does; `wealthfolio` can use Alpine because its upstream is Alpine). Check with `ldd` before choosing.
+- **Never read a boolean option with `jq '.[$k] // empty'`.** jq treats `false` as falsy, so a boolean set to `false` is indistinguishable from an absent key and silently collapses to the default. Use `has($k)` — see `buzz::opt_bool` in `buzz/rootfs/usr/lib/buzz/common.sh`. This bug shipped twice before it was caught.
+- **Test `/data` permissions on a Docker named volume, never a macOS bind mount.** Docker Desktop synthesises ownership for bind-mounted host files, so `0700`/`0600` modes are not enforced and permission bugs stay hidden until the add-on hits real hardware.
+- **`finish` scripts use the s6-overlay v3 path** `/run/s6/basedir/bin/halt`. `surveillancestream` still uses the v2 `s6-svscanctl` form; do not copy it. Give a service no `finish` script when its death should not take the add-on down.
+- **Legacy `services.d` has no ordering.** Whichever service owns the dependency graph must wait for its peers explicitly (`buzz/rootfs/etc/services.d/buzz-relay/run` does this). Do not copy `surveillancestream`'s `bashio::net.wait_for 28765` — that port belongs to motionEye and nothing in that add-on listens on it.
+- **Hand secrets to non-root services through mode-restricted files**, not argv or shell interpolation; generate them hex-only, since these values end up inside `postgres://`, `redis://` and `MC_HOST_*` URIs where base64 padding characters corrupt the URI.
 
 ## Key Files
 

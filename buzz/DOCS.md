@@ -349,3 +349,8 @@ on an SD card. If it persists, the storage is too slow or too full.
 
 **`RELAY_URL host … is not mapped to a community`** from a manual `buzz-admin`
 command means the relay has not finished starting yet. Wait and retry.
+
+---
+
+Unofficial community add-on, not affiliated with Block, Inc. Buzz is Apache-2.0;
+the Buzz name and logo are Block's.

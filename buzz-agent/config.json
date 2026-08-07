@@ -1,6 +1,6 @@
 {
   "name": "Buzz Agent",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "slug": "buzz_agent",
   "description": "Runs a Buzz AI agent that stays online on Home Assistant, connected to your Buzz relay",
   "url": "https://github.com/block/buzz",
@@ -12,6 +12,7 @@
   "startup": "application",
   "boot": "auto",
   "backup": "cold",
+  "stage": "experimental",
   "options": {
     "relay_url": "",
     "owner_pubkey": "",

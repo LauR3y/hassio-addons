@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.6
+
+- Add an add-on icon and logo, and a README so the store shows a description
+  instead of a blank tile.
+- Mark the add-on `experimental`: it pins an upstream `main`-branch snapshot of
+  software that is itself in early beta.
+- Drop the `panel_icon`/`panel_title` keys — they configure the sidebar panel an
+  ingress add-on gets, and this add-on has no ingress, so nothing rendered them.
+
 ## 0.1.5
 
 - Add the bundled NIP-AB device pairing relay, so Buzz Desktop's *Settings →
