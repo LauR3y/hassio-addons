@@ -114,6 +114,29 @@ afterwards so discovery re-runs.
 Note `join_channels` (membership) is not the same as `channels` (a filter that
 narrows which of its channels an already-joined agent listens to).
 
+## How the agent actually replies (and why it might not)
+
+The agent does not "emit" a reply. It is told, in the harness's base prompt, that the `buzz` CLI
+is its interface, and it answers by running `buzz messages send` through the **shell tool** from
+its MCP sidecar. The harness hands that sidecar `BUZZ_RELAY_URL` and the agent's key, so the CLI
+is already authenticated.
+
+That means **an agent with no MCP sidecar is silent by construction**: it receives your message,
+calls the model, produces an answer, and has no way to post it. The turn ends `outcome="ok"` with
+nothing in the channel. The `mcp_command` option defaults to `buzz-dev-mcp` for exactly this
+reason; setting it to `none` disables tools and the agent will not be able to reply.
+
+Signals worth knowing when it goes quiet:
+
+| What you see | Meaning |
+| --- | --- |
+| `⚠️ I couldn't process the last request…` in the channel | The turn ran and the **model** failed. Check the provider and the model. |
+| `agent_returned … outcome="ok"` in the log, nothing in the channel | The model answered but could not post — check `mcp_command`. |
+| No log line at all when you post | The message never matched: not in a channel it belongs to, or no `p` tag (see `require_mention`). |
+
+Note that a filtered-out message logs **nothing at any level**, including `debug`, so silence in
+the log is not evidence that the message failed to arrive.
+
 ## Talking to it
 
 Mention the agent in a channel from Desktop or mobile. With the defaults

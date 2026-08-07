@@ -19,6 +19,20 @@ opt() {
     jq -r --arg k "$1" '.[$k] // empty' "${OPTIONS_FILE}"
 }
 
+# Booleans need their own reader. jq's `//` treats false as absent, so reading a
+# boolean with opt() would make `false` indistinguishable from unset and always
+# fall back to the default. $1 = key, $2 = default ("true"/"false").
+opt_bool() {
+    local value
+    value="$(jq -r --arg k "$1" \
+        'if has($k) and .[$k] != null then (.[$k] | tostring) else "" end' \
+        "${OPTIONS_FILE}")"
+    case "${value}" in
+        true | false) printf '%s' "${value}" ;;
+        *) printf '%s' "$2" ;;
+    esac
+}
+
 put_env() {
     printf '%s' "$2" > "${ENV_DIR}/$1"
     chmod 600 "${ENV_DIR}/$1"
@@ -92,6 +106,28 @@ put_env BUZZ_ACP_AGENT_OWNER "${OWNER}"
 put_env BUZZ_ACP_AGENT_COMMAND "buzz-agent"
 put_env BUZZ_ACP_AGENT_ARGS ""
 
+# The MCP sidecar is what gives the agent its tools, and the agent answers by
+# running `buzz messages send` through the shell tool. With no sidecar,
+# build_mcp_servers() returns an empty list, the agent has no tools at all, and
+# every turn ends "ok" without ever posting a reply. The harness passes the
+# sidecar BUZZ_RELAY_URL and the agent's key, so the CLI is authenticated.
+MCP_COMMAND="$(opt mcp_command)"
+[ -n "${MCP_COMMAND}" ] || MCP_COMMAND="buzz-dev-mcp"
+if [ "${MCP_COMMAND}" = "none" ]; then
+    put_env BUZZ_ACP_MCP_COMMAND ""
+    bashio::log.warning "mcp_command is 'none': the agent will have no tools and cannot reply."
+else
+    put_env BUZZ_ACP_MCP_COMMAND "${MCP_COMMAND}"
+fi
+
+# Whether a message must carry a p tag naming the agent. Upstream default is on;
+# turning it off makes the agent answer anything said in its channels, still
+# gated by respond_to.
+REQUIRE_MENTION="$(opt_bool require_mention true)"
+if [ "${REQUIRE_MENTION}" = "false" ]; then
+    put_env BUZZ_ACP_NO_MENTION_FILTER "true"
+fi
+
 RESPOND_TO="$(opt respond_to)"
 [ -n "${RESPOND_TO}" ] || RESPOND_TO="owner-only"
 put_env BUZZ_ACP_RESPOND_TO "${RESPOND_TO}"
@@ -140,7 +176,9 @@ AVATAR_URL="$(opt avatar_url)"
 [ -n "${AVATAR_URL}" ] && put_env BUZZ_AGENT_AVATAR "${AVATAR_URL}"
 
 bashio::log.info "Agent configured: provider=${PROVIDER} model=${MODEL:-<provider default>} \
-respond_to=${RESPOND_TO} subscribe=${SUBSCRIBE}"
+respond_to=${RESPOND_TO} subscribe=${SUBSCRIBE} mention_required=${REQUIRE_MENTION}"
+bashio::log.info "Tools: ${MCP_COMMAND} — the agent replies by running 'buzz messages send' \
+through its shell tool, so without a tool sidecar it stays silent."
 bashio::log.info "Relay: ${RELAY_URL}"
 bashio::log.info "This must match the Buzz add-on's relay_url exactly, or the relay will answer"
 bashio::log.info "'no community is configured for this host'."

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.3
+
+- **Fix: the agent could never reply.** It answers by running `buzz messages send` through the
+  shell tool of its MCP sidecar, and the add-on never set `BUZZ_ACP_MCP_COMMAND` — so
+  `build_mcp_servers()` returned an empty list, the agent had no tools at all, and every turn
+  finished `outcome="ok"` in silence while still billing the model. Now defaults to
+  `buzz-dev-mcp`, configurable via the new `mcp_command` option.
+- Add `require_mention` (default `true`). Setting it to `false` drops the requirement that a
+  message carry a `p` tag naming the agent, so anything said in its channels triggers a turn —
+  still gated by `respond_to`.
+- Log the tool sidecar and mention requirement at start; both failure modes were previously
+  invisible.
+
 ## 0.1.2
 
 - Add `join_channels`: the agent joins the listed channels (by name or UUID) at
