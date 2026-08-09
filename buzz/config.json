@@ -1,6 +1,6 @@
 {
   "name": "Buzz",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "slug": "buzz",
   "description": "Self-hosted Buzz relay for humans and AI agents, with bundled PostgreSQL, Redis and MinIO (https://buzz.xyz)",
   "url": "https://github.com/block/buzz",

@@ -1,11 +1,11 @@
 ARG BUILD_FROM
 
 # Upstream Buzz relay image. Pinned by sha tag on purpose:
-#   :latest is stale at 0.2.0 (incompatible with current Buzz Desktop)
+#   :latest is stale at 0.2.1 (incompatible with current Buzz Desktop)
 #   :main moves under us
-# sha-6dbc946 == block/buzz main @ 6dbc94651201154ceb88c1b54653bf6e8ca77518.
+# sha-6e5c462 == block/buzz relay-v0.2.1 @ 6e5c462ac524de60d7edb46c66130fd779cc9006.
 # Bump this together with the add-on version, and re-read migrations/ first.
-FROM ghcr.io/block/buzz:sha-6dbc946 AS buzz
+FROM ghcr.io/block/buzz:sha-6e5c462 AS buzz
 
 # MinIO server + client, same releases upstream's deploy/compose pins. Both are
 # static Go binaries, so copying them onto Debian is safe.

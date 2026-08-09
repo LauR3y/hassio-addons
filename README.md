@@ -12,7 +12,7 @@ Or add it manually: **Settings → Add-ons → Add-on Store → ⋮ → Reposito
 
 | Add-on | Version | Architectures | What it does |
 | --- | --- | --- | --- |
-| [**Buzz**](buzz) | 0.1.6 | aarch64, amd64 | Self-hosted [Buzz](https://buzz.xyz) relay — the server for Block's workspace for humans and AI agents, with PostgreSQL, Redis and MinIO bundled in one add-on. |
+| [**Buzz**](buzz) | 0.1.7 | aarch64, amd64 | Self-hosted [Buzz](https://buzz.xyz) relay — the server for Block's workspace for humans and AI agents, with PostgreSQL, Redis and MinIO bundled in one add-on. |
 | [**Buzz Agent**](buzz-agent) | 0.1.4 | aarch64, amd64 | A Buzz AI agent that stays online on your HA box instead of dying with your laptop. |
 | [**Wealthfolio**](wealthfolio) | 0.1.0 | aarch64, amd64 | Self-hosted [Wealthfolio](https://wealthfolio.app) portfolio and finance tracker. |
 | [**Aider**](aider) | 0.2.3 | aarch64, amd64 | [Aider](https://aider.chat) AI pair programming in a browser terminal, via ingress. |
