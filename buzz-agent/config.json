@@ -38,10 +38,10 @@
   "schema": {
     "relay_url": "match(^wss?://[A-Za-z0-9._:\\[\\]-]+$)",
     "owner_pubkey": "match(^(npub1[023456789acdefghjklmnpqrstuvwxyz]{58}|[0-9a-fA-F]{64})$)",
-    "agents": "str?",
+    "agents": "multiline?",
     "role": "list(agent|coding|finance|home|research|security)?",
     "display_name": "str?",
-    "about": "str?",
+    "about": "multiline?",
     "avatar_url": "str?",
     "provider": "list(openrouter|anthropic|openai|databricks)",
     "api_key": "password",
@@ -54,7 +54,7 @@
     "subscribe": "list(mentions|all)?",
     "require_mention": "bool?",
     "mcp_command": "str?",
-    "system_prompt": "str?",
+    "system_prompt": "multiline?",
     "log_level": "list(trace|debug|info|warn|error)?"
   }
 }
