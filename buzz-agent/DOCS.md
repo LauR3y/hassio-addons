@@ -25,19 +25,21 @@ runtime and the image is ~53 MB.
 | --- | --- |
 | `relay_url` | **Must be byte-identical to the Buzz add-on's `relay_url`.** |
 | `owner_pubkey` | Who the agent takes instructions from — normally your own key, the same one the relay has as owner. |
-| `provider` | `openrouter` (default), `anthropic`, `openai` or `databricks`. |
-| `api_key` | Your LLM API key. Stored as a password field. |
-| `model` | e.g. `anthropic/claude-sonnet-4.5` for OpenRouter, `claude-sonnet-4-5` for Anthropic. |
+| `provider` | `openrouter` (default), `anthropic`, `openai` or `databricks`. Shared by all agents. |
+| `api_key` | Your LLM API key. Stored as a password field. Shared by all agents. |
+| `model` | e.g. `anthropic/claude-sonnet-4.5` for OpenRouter, `claude-sonnet-4-5` for Anthropic. Shared by all agents unless overridden per-agent. |
 | `api_base_url` | Required for `openai` (any OpenAI-compatible endpoint) and `databricks`. |
-| `display_name`, `about`, `avatar_url` | The profile the agent publishes, so it appears under a name rather than a bare npub. |
-| `respond_to` | `owner-only` (default), `anyone`, or `allowlist`. |
+| `agents` | **Multi-agent mode.** A JSON array string of per-agent override objects. Each object inherits the top-level options and overrides any fields it sets. Leave empty for single-agent mode (identical to 0.1.x). Example: `[{"display_name":"Coder","role":["coding"]},{"display_name":"Researcher","role":["research"]}]`. |
+| `role` | `list(agent\|coding\|finance\|home\|research\|security)`. Default role(s) applied to all agents. An agent in the `agents` array may override this with its own `role`. Forwarded to the agent as `BUZZ_AGENT_ROLE`. |
+| `display_name`, `about`, `avatar_url` | The profile the agent publishes, so it appears under a name rather than a bare npub. Can be overridden per-agent. |
+| `respond_to` | `owner-only` (default), `anyone`, or `allowlist`. Can be overridden per-agent. |
 | `respond_to_allowlist` | Comma-separated hex pubkeys, required when `respond_to` is `allowlist`. |
 | `subscribe` | `mentions` (default) or `all`. |
 | `require_mention` | `true` (default) means a message must tag the agent. Set `false` to answer anything said in its channels — still gated by `respond_to`. |
-| `join_channels` | Channels to join at start, by name or UUID, comma-separated. Without this the agent belongs to nothing and sits idle. |
+| `join_channels` | Channels to join at start, by name or UUID, comma-separated. Without this the agent belongs to nothing and sits idle. Can be overridden per-agent. |
 | `channels` | Optional filter narrowing which of its channels it listens to. Not the same as `join_channels`. |
 | `mcp_command` | Tool sidecar, default `buzz-dev-mcp`. The agent replies by running `buzz messages send` through its shell tool, so `none` leaves it unable to answer. |
-| `system_prompt` | Optional extra instructions. |
+| `system_prompt` | Optional extra instructions. Can be overridden per-agent. |
 | `log_level` | `trace`, `debug`, `info` (default), `warn` or `error`. Note a message dropped by the mention filter logs nothing at any level. |
 
 The `relay_url` warning is not decoration: the relay resolves a community from
@@ -75,6 +77,84 @@ this add-on again. It stays connected and appears online in Buzz.
 Giving the agent its **own** key rather than sharing yours is deliberate: it can
 be revoked on its own by removing that one entry, and its messages are
 attributable to it.
+
+## Multiple agents
+
+The add-on can run **several independent agents** from one instance. Each agent
+gets its own Nostr identity, workspace, and configuration — useful for dedicating
+one agent to a channel (e.g. a coding assistant in `#dev`) and another to a
+different purpose (e.g. a home-automation assistant in `#home`).
+
+### Configure
+
+Set the `agents` option to a JSON array of per-agent override objects. Every
+object inherits the top-level options; anything it sets overrides the default.
+Shared infrastructure — `relay_url`, `owner_pubkey`, `provider`, `api_key`,
+`api_base_url` — is always shared; everything else (`display_name`, `role`,
+`system_prompt`, `channels`, `join_channels`, `model`, `mcp_command`, …) can be
+overridden per agent.
+
+```json
+[
+  {
+    "display_name": "Coder",
+    "role": ["coding"],
+    "join_channels": "dev"
+  },
+  {
+    "display_name": "Home Bot",
+    "role": ["home"],
+    "system_prompt": "You help with Home Assistant automations.",
+    "join_channels": "home"
+  }
+]
+```
+
+The top-level `role` option is a default applied to every agent; an agent that
+specifies its own `role` replaces it. Leave `agents` empty for single-agent mode
+(identical to 0.1.x).
+
+### Start and register
+
+On first start the add-on prints each agent's public key:
+
+```
+Agent public keys:
+  Agent 0: b001f6ffd3d6c466352110deeb8c4992dc637172fb1318d4adeaf10697e5890d
+  Agent 1: 3a7cdef09b8e1f2c3456071829abcdeff0123456789abcdef0123456789abcdef
+```
+
+Add **every** key to the Buzz add-on's `members` list, then restart the agent
+add-on:
+
+```yaml
+members:
+  - pubkey: b001f6ffd3d6c466352110deeb8c4992dc637172fb1318d4adeaf10697e5890d
+    role: member
+  - pubkey: 3a7cdef09b8e1f2c3456071829abcdeff0123456789abcdef0123456789abcdef
+    role: member
+```
+
+Each agent publishes its own profile and joins its own channels independently
+at start.
+
+### Isolation
+
+Each agent runs in its own process with a separate private key, HOME
+directory, and workspace:
+
+| Agent | Private key | Workspace | Env dir |
+| --- | --- | --- | --- |
+| 0 | `/data/.secrets/agent_0_private_key` | `/data/agents/0/workspace` | `/var/run/buzz-agent/agents/0/env/` |
+| 1 | `/data/.secrets/agent_1_private_key` | `/data/agents/1/workspace` | `/var/run/buzz-agent/agents/1/env/` |
+
+Upgrading from 0.1.x auto-migrates the legacy key
+(`/data/.secrets/agent_private_key`) to `agent_0_private_key`, so your existing
+single agent keeps its identity without re-registration.
+
+If any agent process exits, the supervisor tears down all agents and halts the
+add-on so Home Assistant can restart it — a half-dead set of agents is worse
+than a clean restart.
 
 ## Where the agent appears — and why it might look invisible
 
@@ -167,9 +247,10 @@ guards available; the provider's own usage limits are the real backstop.
 
 ## Backups
 
-`/data/.secrets/agent_private_key` is the agent's identity. Losing it means
-generating a new one and re-adding it to the relay — annoying but not fatal, and
-nothing else in `/data` is precious. The add-on is marked `backup: cold`.
+`/data/.secrets/agent_private_key` (0.1.x) or `/data/.secrets/agent_<i>_private_key`
+(multi-agent) is the agent's identity. Losing it means generating a new one and
+re-adding it to the relay — annoying but not fatal, and nothing else in `/data`
+is precious. The add-on is marked `backup: cold`.
 
 ## Troubleshooting
 
@@ -191,8 +272,8 @@ you set it.
 
 - The upstream image is pinned by tag in the `Dockerfile` and bumped
   deliberately with the add-on version.
-- One agent per add-on instance. A second agent means a second copy of this
-  directory with its own slug.
+- Multiple agents can run in a single add-on instance via the `agents` option;
+  each gets its own key, workspace, and process.
 - MCP servers other than the bundled `buzz-dev-mcp` are not wired up yet.
 
 ---

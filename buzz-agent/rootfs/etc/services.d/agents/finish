@@ -1,7 +1,8 @@
 #!/usr/bin/execlineb -S0
 # ==============================================================================
 # Home Assistant Add-on: Buzz Agent
-# The agent is the only thing this add-on runs, so if the harness stops there is
-# nothing left to supervise -- take the tree down and let HA surface it.
+# If the agent supervisor exits (any agent died), halt the s6 tree so HA can
+# surface the failure and restart the add-on. A half-dead set of agents is
+# worse than a clean restart of the whole container.
 # ==============================================================================
 /run/s6/basedir/bin/halt

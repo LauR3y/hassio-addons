@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.2.0
+
+### Multiple agents per add-on instance
+
+A single Buzz Agent add-on can now run **multiple independent agents**, each
+with its own Nostr identity, workspace, and configuration overrides. The
+`agents` option accepts a JSON array of per-agent override objects; each object
+inherits the top-level options and overrides any fields it sets. When `agents`
+is empty, the add-on behaves identically to 0.1.x — one agent from the
+top-level options.
+
+- New `agents` option (JSON array string): per-agent overrides for `display_name`,
+  `about`, `avatar_url`, `system_prompt`, `role`, `model`, `provider`,
+  `respond_to`, `channels`, `join_channels`, `mcp_command`, `log_level` and more.
+- New `role` option (`list(agent|coding|finance|home|research|security)`):
+  assigns a persona role to the agent(s). The top-level value is a default for
+  all agents; each agent may override it. Roles are forwarded to the agent as
+  `BUZZ_AGENT_ROLE`.
+- Each agent gets its own private key (`/data/.secrets/agent_<i>_private_key`),
+  public key (`/data/agents/<i>_pubkey`), env dir
+  (`/var/run/buzz-agent/agents/<i>/env/`), HOME
+  (`/data/agents/<i>/home`) and workspace
+  (`/data/agents/<i>/workspace`).
+- The legacy single-agent key (`/data/.secrets/agent_private_key`) is
+  auto-migrated to `agent_0_private_key` on first start after upgrade.
+- `services.d/agents/run` replaces `services.d/agent/`: it launches one
+  `buzz-acp` per agent, fans SIGTERM to all children on shutdown, and halts
+  the add-on if any agent exits.
+- The `20-agent-config.sh` init script merges per-agent overrides over the
+  top-level defaults via `jq`, using `has()` (not `//`) so that boolean options
+  set to `false` are preserved rather than collapsed to the default.
+
 ## 0.1.4
 
 - Add an add-on icon and logo, and a README so the store shows a description.
