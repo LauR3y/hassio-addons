@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.7
+
+- Pin the upstream Buzz relay image to `sha-6e5c462` (`block/buzz` relay-v0.2.1,
+  commit `6e5c462ac524de60d7edb46c66130fd779cc9006`). The previous pin
+  (`sha-6dbc946`) tracked a 0.2.0 snapshot and `:latest` is stale at 0.2.0
+  relative to current Buzz Desktop.
+- Packaging-only change: the bundled PostgreSQL 17, Redis, and MinIO images and
+  all add-on env (`BUZZ_WEB_DIR`/`BUZZ_ADMIN_WEB_DIR`) are unchanged. Upstream
+  binary paths (`buzz-relay`/`buzz-admin`/`buzz-pair-relay` at `/usr/local/bin`,
+  web bundles under `/srv/buzz`) are unchanged in 0.2.1.
+- On first boot the relay applies 22 new schema migrations to the existing
+  `/data` Postgres (0007-0028). There is no add-on-side migration: the relay
+  self-migrates. Back up `/data` (a full add-on backup) before upgrading, since
+  the migrations are one-way against your existing database.
+
 ## 0.1.6
 
 - Add an add-on icon and logo, and a README so the store shows a description
