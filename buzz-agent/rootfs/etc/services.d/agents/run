@@ -1,0 +1,202 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Home Assistant Add-on: Buzz Agent
+#
+# Single-service supervisor for one or more buzz-acp harness processes.
+# In single-agent mode (agents option is empty) it behaves identically to the
+# old services.d/agent/run: load the shared env dir, publish a profile, join
+# channels, and exec buzz-acp in the foreground.
+#
+# In multi-agent mode it launches one buzz-acp per agent in isolated subshells
+# — each with its own env dir, HOME, and workspace — then waits. A SIGTERM from
+# s6 is fanned out to every child so they all shut down together. If any child
+# exits, the supervisor tears down the rest and exits itself (so s6/halt can
+# take the add-on down rather than leaving half-dead agents).
+# ==============================================================================
+set -e
+
+OPTIONS_FILE=/data/options.json
+SECRETS_DIR=/data/.secrets
+ENV_BASE=/var/run/buzz-agent
+
+# ------------------------------------------------------------------------------
+# Determine agent count — must match 10-agent-identity.sh and 20-agent-config.sh
+# ------------------------------------------------------------------------------
+AGENTS_JSON="$(jq -r '.agents // empty' "${OPTIONS_FILE}")"
+AGENT_COUNT=0
+if [ -n "${AGENTS_JSON}" ] && [ "${AGENTS_JSON}" != "[]" ]; then
+    AGENT_COUNT="$(printf '%s' "${AGENTS_JSON}" | jq 'length')"
+fi
+
+# Convert a ws/wss relay URL into the http/https form the buzz CLI expects.
+relay_to_http() {
+    local http="${1/#ws:/http:}"
+    http="${http/#wss:/https:}"
+    http="${http%/}"
+    printf '%s' "${http}"
+}
+
+# Set up the nostr git credential helper for whatever BUZZ_RELAY_URL the current
+# env loaded — all agents share the same relay, so the config line is identical;
+# each just writes it to its own isolated gitglobal config file.
+setup_git_credential() {
+    if [ -n "${BUZZ_RELAY_URL:-}" ]; then
+        local relay_http
+        relay_http="$(relay_to_http "${BUZZ_RELAY_URL}")"
+        s6-setuidgid agent git config --global \
+            "credential.${relay_http}/git.helper" /usr/local/bin/git-credential-nostr
+        s6-setuidgid agent git config --global \
+            "credential.${relay_http}/git.useHttpPath" true
+    fi
+}
+
+# Publish the agent's kind:0 profile so it shows up by name, not bare npub.
+# Idempotent (kind:0 is replaceable). Fails until the pubkey is a relay member —
+# that is expected on first run; warn and carry on.
+publish_profile() {
+    local relay_http="$1"
+    if [ -n "${BUZZ_AGENT_DISPLAY_NAME:-}" ] && [ -n "${relay_http}" ]; then
+        set -- --name "${BUZZ_AGENT_DISPLAY_NAME}"
+        [ -n "${BUZZ_AGENT_ABOUT:-}" ]    && set -- "$@" --about "${BUZZ_AGENT_ABOUT}"
+        [ -n "${BUZZ_AGENT_AVATAR:-}" ]   && set -- "$@" --avatar "${BUZZ_AGENT_AVATAR}"
+        if BUZZ_RELAY_URL="${relay_http}" s6-setuidgid agent \
+                /usr/local/bin/buzz users set-profile "$@" > /dev/null 2>&1; then
+            bashio::log.info "Published agent profile as '${BUZZ_AGENT_DISPLAY_NAME}'"
+        else
+            bashio::log.warning "Could not publish the agent profile — this is normal until the"
+            bashio::log.warning "agent's pubkey is added to the relay's members. It will retry on restart."
+        fi
+    fi
+}
+
+# Join the configured channels. The harness only discovers channels the agent is
+# already a member of, so without this an agent sits idle regardless of other
+# config. Joining is idempotent; entries may be UUIDs or names (resolved via
+# the relay's channel search).
+join_channels() {
+    local relay_http="$1"
+    if [ -z "${BUZZ_AGENT_JOIN_CHANNELS:-}" ] || [ -z "${relay_http}" ]; then
+        return
+    fi
+    local old_ifs="${IFS}"; IFS=','
+    for entry in ${BUZZ_AGENT_JOIN_CHANNELS}; do
+        IFS="${old_ifs}"
+        entry="$(echo "${entry}" | tr -d '[:space:]')"
+        [ -n "${entry}" ] || continue
+
+        case "${entry}" in
+            [0-9a-fA-F]*-[0-9a-fA-F]*-[0-9a-fA-F]*-[0-9a-fA-F]*-[0-9a-fA-F]*)
+                uuid="${entry}"
+                ;;
+            *)
+                uuid="$(BUZZ_RELAY_URL="${relay_http}" s6-setuidgid agent \
+                    /usr/local/bin/buzz channels search --query "${entry}" --exact 2>/dev/null \
+                    | jq -r '[.. | objects | select(has("channel_id")) | .channel_id] | first // empty')"
+                if [ -z "${uuid}" ]; then
+                    bashio::log.warning "No channel named '${entry}' is visible to the agent; skipping."
+                    IFS=','
+                    continue
+                fi
+                ;;
+        esac
+
+        if BUZZ_RELAY_URL="${relay_http}" s6-setuidgid agent \
+                /usr/local/bin/buzz channels join --channel "${uuid}" > /dev/null 2>&1; then
+            bashio::log.info "Joined channel ${entry} (${uuid})"
+        else
+            bashio::log.warning "Could not join channel ${entry} (${uuid}); it may be private or already joined."
+        fi
+        IFS=','
+    done
+    IFS="${old_ifs}"
+}
+
+# ------------------------------------------------------------------------------
+# Launch one agent in a backgrounded subshell with fully isolated env.
+#   $1 = display label (for logging)
+#   $2 = env_dir   (file-per-var env directory)
+#   $3 = home_dir   (isolated HOME for git config)
+#   $4 = workspace  (working directory for the agent)
+# ------------------------------------------------------------------------------
+launch_agent() {
+    local label="$1" env_dir="$2" home_dir="$3" workspace="$4"
+
+    (
+        # Load this agent's env vars from files — no secret in argv.
+        for file in "${env_dir}"/*; do
+            [ -f "${file}" ] || continue
+            # shellcheck disable=SC1090,SC2086
+            export "$(basename "${file}")=$(cat "${file}")"
+        done
+
+        export HOME="${home_dir}"
+
+        # Git credential helper for relay-signed commits
+        setup_git_credential
+
+        # Profile + channel membership
+        local relay_http=""
+        if [ -n "${BUZZ_RELAY_URL:-}" ]; then
+            relay_http="$(relay_to_http "${BUZZ_RELAY_URL}")"
+        fi
+        publish_profile "${relay_http}"
+        join_channels "${relay_http}"
+
+        if [ -z "${BUZZ_AGENT_JOIN_CHANNELS:-}" ]; then
+            bashio::log.info "No join_channels configured for '${label}'. The agent only acts in \
+channels it belongs to, so add it to a channel in Buzz or set join_channels, \
+otherwise the log will say 'discovered 0 channel(s)' and nothing will happen."
+        fi
+
+        bashio::log.info "Starting agent '${label}' (role: ${BUZZ_AGENT_ROLE:-none})"
+        cd "${workspace}"
+        exec s6-setuidgid agent /usr/local/bin/buzz-acp
+    ) &
+    CHILD_PIDS+=($!)
+}
+
+# ------------------------------------------------------------------------------
+# Signal handling — fan out SIGTERM/SIGINT to every child, then exit.
+# ------------------------------------------------------------------------------
+CHILD_PIDS=()
+
+_shutdown() {
+    bashio::log.info "Shutting down all agents..."
+    local pid
+    for pid in "${CHILD_PIDS[@]}"; do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+}
+trap '_shutdown; exit 0' SIGTERM
+trap '_shutdown; exit 0' SIGINT
+
+# ------------------------------------------------------------------------------
+# Launch
+# ------------------------------------------------------------------------------
+if [ "${AGENT_COUNT}" -eq 0 ]; then
+    # --- Single-agent mode (backward compatible with 0.1.x) ---
+    launch_agent "default" \
+        "${ENV_BASE}/env" \
+        "/data/agent" \
+        "/data/workspace"
+else
+    # --- Multi-agent mode ---
+    for i in $(seq 0 $((AGENT_COUNT - 1))); do
+        launch_agent "agent-${i}" \
+            "${ENV_BASE}/agents/${i}/env" \
+            "/data/agents/${i}/home" \
+            "/data/agents/${i}/workspace"
+    done
+    bashio::log.info "Started ${AGENT_COUNT} agents"
+fi
+
+# Wait for any child to exit. If one dies, tear down the rest — a half-dead
+# set of agents is worse than a clean container restart.
+set +e
+wait -n
+EXIT_CODE=$?
+set -e
+
+_shutdown
+exit "${EXIT_CODE}"

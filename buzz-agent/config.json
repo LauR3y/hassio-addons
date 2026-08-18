@@ -1,8 +1,8 @@
 {
   "name": "Buzz Agent",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "slug": "buzz_agent",
-  "description": "Runs a Buzz AI agent that stays online on Home Assistant, connected to your Buzz relay",
+  "description": "Runs one or more Buzz AI agents that stay online on Home Assistant, connected to your Buzz relay",
   "url": "https://github.com/block/buzz",
   "arch": [
     "aarch64",
@@ -16,6 +16,8 @@
   "options": {
     "relay_url": "",
     "owner_pubkey": "",
+    "agents": "",
+    "role": "",
     "display_name": "Buzz Agent",
     "about": "",
     "avatar_url": "",
@@ -36,6 +38,8 @@
   "schema": {
     "relay_url": "match(^wss?://[A-Za-z0-9._:\\[\\]-]+$)",
     "owner_pubkey": "match(^(npub1[023456789acdefghjklmnpqrstuvwxyz]{58}|[0-9a-fA-F]{64})$)",
+    "agents": "str?",
+    "role": "list(agent|coding|finance|home|research|security)?",
     "display_name": "str?",
     "about": "str?",
     "avatar_url": "str?",
