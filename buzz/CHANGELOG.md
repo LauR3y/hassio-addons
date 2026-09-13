@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.8
+
+- Pull the bundled MinIO server and client from `quay.io` instead of Docker Hub.
+  MinIO withdrew `minio/minio` and `minio/mc` from Docker Hub, so every build
+  failed with `pull access denied ... insufficient_scope` and the add-on could
+  not start (`Image ...aarch64-addon-buzz:0.1.7 does not exist`).
+- Build-only change: identical MinIO releases (`RELEASE.2025-09-07T16-13-09Z`
+  and `RELEASE.2025-08-13T08-35-41Z`), identical binaries, no data migration.
+
 ## 0.1.7
 
 - Pin the upstream Buzz relay image to `sha-6e5c462` (`block/buzz` relay-v0.2.1,
