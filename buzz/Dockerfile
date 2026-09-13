@@ -9,8 +9,12 @@ FROM ghcr.io/block/buzz:sha-6e5c462 AS buzz
 
 # MinIO server + client, same releases upstream's deploy/compose pins. Both are
 # static Go binaries, so copying them onto Debian is safe.
-FROM minio/minio:RELEASE.2025-09-07T16-13-09Z AS minio
-FROM minio/mc:RELEASE.2025-08-13T08-35-41Z AS mc
+# quay.io, not Docker Hub: MinIO withdrew minio/minio and minio/mc from Docker
+# Hub (auth.docker.io grants an empty pull scope, so the manifest 401s and the
+# build dies with "pull access denied ... insufficient_scope"). quay.io still
+# carries these exact release tags for arm64 and amd64.
+FROM quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z AS minio
+FROM quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z AS mc
 
 FROM ${BUILD_FROM}
 
