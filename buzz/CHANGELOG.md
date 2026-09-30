@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.9
+
+- Pull the bundled MinIO server and client from `cgr.dev/chainguard/minio` and
+  `cgr.dev/chainguard/minio-client` (pinned by digest). The 0.1.8 build failed
+  with `401 UNAUTHORIZED` because `quay.io/minio/*` is no longer public, and
+  `dl.min.io` now returns `410 Gone`: MinIO has archived the open-source
+  server and client and stopped distributing them.
+- MinIO moves from `RELEASE.2025-09-07T16-13-09Z` to Chainguard's source build
+  (`RELEASE.2026-09-22T19-25-18Z`). Newer servers read existing `/data/minio`
+  in place; no data migration.
+
 ## 0.1.8
 
 - Pull the bundled MinIO server and client from `quay.io` instead of Docker Hub.
