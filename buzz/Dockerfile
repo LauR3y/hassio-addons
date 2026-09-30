@@ -7,14 +7,18 @@ ARG BUILD_FROM
 # Bump this together with the add-on version, and re-read migrations/ first.
 FROM ghcr.io/block/buzz:sha-6e5c462 AS buzz
 
-# MinIO server + client, same releases upstream's deploy/compose pins. Both are
-# static Go binaries, so copying them onto Debian is safe.
-# quay.io, not Docker Hub: MinIO withdrew minio/minio and minio/mc from Docker
-# Hub (auth.docker.io grants an empty pull scope, so the manifest 401s and the
-# build dies with "pull access denied ... insufficient_scope"). quay.io still
-# carries these exact release tags for arm64 and amd64.
-FROM quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z AS minio
-FROM quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z AS mc
+# MinIO server + client from Chainguard. Both are statically linked Go
+# binaries at /usr/bin, so copying them onto Debian is safe.
+# MinIO archived the open-source server/client and pulled every official
+# channel: Docker Hub minio/* grants an empty pull scope, quay.io/minio/* 401s
+# anonymously, and dl.min.io answers 410 Gone. cgr.dev/chainguard still builds
+# both from source, anonymously, for arm64 and amd64.
+# Pinned by multi-arch index digest: the free tier only publishes :latest, so a
+# digest can eventually be garbage-collected. When that happens, re-pin to the
+# current :latest digest; if Chainguard drops the images, build from the
+# archived github.com/minio/{minio,mc} tags in a golang stage instead.
+FROM cgr.dev/chainguard/minio@sha256:4692462f35d97d7e82c30371d82f057703c5d9489bcae726010594c812f2d285 AS minio
+FROM cgr.dev/chainguard/minio-client@sha256:ad8dcbf569b9ae56536c3cfd23b850cb05b42fd6aae22767ae66acbcf161a224 AS mc
 
 FROM ${BUILD_FROM}
 
